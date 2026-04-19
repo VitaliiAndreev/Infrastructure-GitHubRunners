@@ -43,15 +43,14 @@
 **What:** Create the directory structure and placeholder files.
 
 ```
-github/
+hyper-v/
 └── ubuntu/
     ├── register-runners.ps1    (empty)
     └── setup-secrets.ps1       (empty)
 ```
 
-**Why:** Establishes the `ci-provider/guest-os/` convention before any code
-is written; mirrors the `hypervisor/guest-os/` convention in
-Infrastructure-Vm-Provisioner.
+**Why:** Matches the `hyper-v/ubuntu/` convention used by
+Infrastructure-Vm-Provisioner and Infrastructure-Vm-Users.
 
 ---
 
