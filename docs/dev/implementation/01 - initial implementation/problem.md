@@ -53,8 +53,18 @@ self-hosted GitHub Actions runner on each VM and keep it running as a service.
 - If a runner is registered but its systemd service is not running (crashed
   or stopped), the script must attempt to restart it and surface a clear error
   if the restart fails - silent failures are not acceptable.
-- Multiple runners per VM are supported — each gets its own subdirectory
-  under `/home/u-actions-runner/runners/{runnerName}/`.
+- A single runner process is bound to exactly one repo — GitHub does not
+  support assigning a repo-level runner to multiple repos (org-level
+  runners would, but there is no org). To cover multiple repos on the
+  same VM, register one runner process per repo; each gets its own
+  subdirectory under `/home/u-actions-runner/runners/{runnerName}/`.
+  Re-running the script with a new config entry for the same VM adds the
+  new runner without disturbing existing ones (idempotency guarantee).
+- Two runner purposes are recommended per VM: a general CI runner
+  (`self-hosted`, `ubuntu`, `x64`) and an infra/deploy runner (adds the
+  `infra` label). This is a security boundary — infra workflows that
+  touch secrets vaults or SSH credentials must not share a runner process
+  with general build/test jobs.
 - Uses `Infrastructure.Secrets` (PSGallery) for vault setup, same pattern as
   Infrastructure-Vm-Provisioner.
 - Assumes `u-runner-deploy` and `u-actions-runner` already exist on each VM,
