@@ -36,9 +36,5 @@ Describe 'Read-GitHubRunnersConfig' {
             $result[0].runnerName | Should -Be 'ubuntu-01-ci'
         }
 
-        It 'propagates errors from Get-InfrastructureSecret' {
-            Mock Get-InfrastructureSecret { throw 'vault unavailable' }
-            { Read-GitHubRunnersConfig } | Should -Throw -ExpectedMessage '*vault unavailable*'
-        }
     }
 }

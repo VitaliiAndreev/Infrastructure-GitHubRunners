@@ -116,10 +116,12 @@ Describe 'ConvertFrom-GitHubRunnersConfigJson' {
             }
         }
 
-        It 'throws when Assert-RequiredProperties throws for an entry' {
-            Mock Assert-RequiredProperties { throw "Runner entry is missing required property 'vmName'." }
-            { ConvertFrom-GitHubRunnersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)) } |
-                Should -Throw -ExpectedMessage '*missing required property*'
+        It 'passes "Runner entry" as the Context argument to Assert-RequiredProperties' {
+            Mock Assert-RequiredProperties {}
+            @(ConvertFrom-GitHubRunnersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)))
+            Should -Invoke Assert-RequiredProperties -Times 1 -Exactly -ParameterFilter {
+                $Context -eq 'Runner entry'
+            }
         }
     }
 

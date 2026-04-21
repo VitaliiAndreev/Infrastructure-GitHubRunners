@@ -55,9 +55,15 @@ Describe 'Read-VmDeployPasswords' {
             $result['vm-b|u-deploy']   | Should -Be 'pc'
         }
 
-        It 'propagates errors from Get-InfrastructureSecret' {
-            Mock Get-InfrastructureSecret { throw 'vault unavailable' }
-            { Read-VmDeployPasswords } | Should -Throw -ExpectedMessage '*vault unavailable*'
+        It 'skips a VM entry where the users property is absent' {
+            # ConvertFrom-Json in PS 5.1 omits properties whose JSON value is
+            # an empty array, so 'users' may not exist on the object at all.
+            # Select-Object -ExpandProperty with SilentlyContinue handles this.
+            Mock Get-InfrastructureSecret {
+                '[{"vmName":"ubuntu-01"}]'
+            }
+            $result = Read-VmDeployPasswords
+            $result.Count | Should -Be 0
         }
     }
 }
