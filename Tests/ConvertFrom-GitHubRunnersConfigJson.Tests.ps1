@@ -13,21 +13,21 @@ BeforeAll {
     # Individual tests override specific fields as needed.
     function New-ValidEntryJson {
         param(
-            [string] $VmName       = 'ubuntu-01-ci',
-            [string] $IpAddress    = '192.168.1.101',
-            [string] $DeployUser   = 'u-runner-deploy',
-            [string] $GithubUrl    = 'https://github.com/user/repo',
-            [string] $RunnerName   = 'ubuntu-01-ci',
-            [string] $LabelsJson   = '["self-hosted","ubuntu","x64"]'
+            [string] $VmName         = 'ubuntu-01-ci',
+            [string] $IpAddress      = '192.168.1.101',
+            [string] $DeployUser     = 'u-runner-deploy',
+            [string] $GithubUrl      = 'https://github.com/user/repo',
+            [string] $RunnerName     = 'ubuntu-01-ci',
+            [string] $LabelsJson     = '["self-hosted","ubuntu","x64"]'
         )
         @"
 {
-    "vmName":         "$VmName",
-    "ipAddress":      "$IpAddress",
-    "deployUsername": "$DeployUser",
-    "githubUrl":      "$GithubUrl",
-    "runnerName":     "$RunnerName",
-    "runnerLabels":   $LabelsJson
+    "vmName":          "$VmName",
+    "ipAddress":       "$IpAddress",
+    "deployUsername":  "$DeployUser",
+    "githubUrl":       "$GithubUrl",
+    "runnerName":      "$RunnerName",
+    "runnerLabels":    $LabelsJson
 }
 "@
     }
@@ -104,11 +104,11 @@ Describe 'ConvertFrom-GitHubRunnersConfigJson' {
             Mock Assert-RequiredProperties {}
             @(ConvertFrom-GitHubRunnersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)))
             Should -Invoke Assert-RequiredProperties -Times 1 -Exactly -ParameterFilter {
-                $Properties -contains 'vmName'         -and
-                $Properties -contains 'ipAddress'      -and
-                $Properties -contains 'deployUsername' -and
-                $Properties -contains 'githubUrl'      -and
-                $Properties -contains 'runnerName'     -and
+                $Properties -contains 'vmName'          -and
+                $Properties -contains 'ipAddress'       -and
+                $Properties -contains 'deployUsername'  -and
+                $Properties -contains 'githubUrl'       -and
+                $Properties -contains 'runnerName'      -and
                 $Properties -contains 'runnerLabels'
             }
         }
