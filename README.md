@@ -1,6 +1,158 @@
 # Infrastructure-GitHubRunners
 
-<!-- TODO: expand after implementation -->
-
 Registers self-hosted GitHub Actions runners on Ubuntu VMs provisioned by
-[Infrastructure-Vm-Provisioner](https://github.com/VitalyAndrev/Infrastructure-Vm-Provisioner).
+[Infrastructure-Vm-Provisioner](https://github.com/VitalyAndreev/Infrastructure-Vm-Provisioner).
+
+## Index
+
+- [Prerequisites](#prerequisites)
+- [Quick start](#quick-start)
+- [Config schema](#config-schema)
+- [PAT requirements](#pat-requirements)
+- [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
+- [Idempotency](#idempotency)
+- [Repo structure](#repo-structure)
+
+---
+
+## Prerequisites
+
+- Windows host with Hyper-V and PowerShell 5.1+.
+- VMs provisioned by **Infrastructure-Vm-Provisioner** and reachable.
+- A deploy user and a runner service user created on each VM by
+  **Infrastructure-Vm-Users** before running this script (named in the
+  config as `deployUsername` and `runnerUsername` respectively; for example
+  `u-runner-deploy` and `u-actions-runner`).
+  - Deploy user: SSH-accessible; sudoers scoped to runner operations only.
+  - Runner service user: no-login; owns and runs the runner process.
+- `setup-secrets.ps1` run at least once on this machine to store runner config
+  in the local vault.
+- Deploy passwords for `u-runner-deploy` stored in the **VmUsers** vault by
+  Infrastructure-Vm-Users — this repo reads them at runtime and never stores
+  them itself.
+
+---
+
+## Quick start
+
+```powershell
+# 1. Store runner config in the local vault (once per machine).
+.\hyper-v\ubuntu\setup-secrets.ps1 -ConfigFile C:\private\runners-config.json
+
+# 2. Register runners on all reachable VMs.
+.\hyper-v\ubuntu\register-runners.ps1
+```
+
+`register-runners.ps1` prompts for a GitHub PAT at startup. The PAT is held
+in memory only and is never written to disk or logged.
+
+---
+
+## Config schema
+
+Store as a JSON array in the file passed to `setup-secrets.ps1`.
+One entry = one runner process. Multiple entries with the same `vmName`
+are valid and expected (see [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)).
+
+```jsonc
+[
+  {
+    "vmName":         "ubuntu-01-ci",       // must match VmProvisionerConfig
+    "ipAddress":      "192.168.1.101",
+    "deployUsername": "u-runner-deploy",    // SSH user for deploy operations
+    "runnerUsername": "u-actions-runner",   // service user that owns runner files
+    "githubUrl":      "https://github.com/user/repo-a",
+    "runnerName":     "ubuntu-01-ci",       // unique name shown in GitHub UI
+    "runnerLabels":   ["self-hosted", "ubuntu", "x64"]
+  }
+]
+```
+
+`deployPassword` is intentionally absent. It is read from the **VmUsers**
+vault at runtime — Infrastructure-Vm-Users is the single source of truth for
+deploy credentials. Never add passwords to this file.
+
+---
+
+## PAT requirements
+
+The PAT is prompted at runtime and never stored. Required scopes:
+
+| Repo visibility | Required scope |
+|---|---|
+| Private | `repo` |
+| Public | `public_repo` |
+
+The PAT is used to authenticate the GitHub Releases API request that resolves
+the latest runner version, and will also be used in Step 5 (not yet
+implemented) to list existing runners and fetch registration tokens.
+
+---
+
+## Multi-repo and multi-purpose runners
+
+GitHub repo-level runners are bound 1:1 to a single repo (no org-level
+runners). To cover multiple repos on one VM, add one entry per repo.
+
+The recommended pattern is two runner purposes per VM:
+
+| Purpose | Labels | Targeted by |
+|---|---|---|
+| General CI | `self-hosted`, `ubuntu`, `x64` | Build, test, lint workflows |
+| Infra/deploy | `self-hosted`, `ubuntu`, `x64`, `infra` | Provisioning, SSH-based deploy |
+
+Keeping infra workflows on a dedicated runner is a security boundary: a
+compromised job on the general runner cannot access secrets vaults or SSH
+credentials that infra workflows use. Workflows opt in via
+`runs-on: [self-hosted, infra]`.
+
+Example config for one VM covering two repos with dedicated infra runners:
+
+```jsonc
+[
+  { "vmName": "ubuntu-01-ci", ..., "githubUrl": "https://github.com/user/repo-a",
+    "runnerName": "ubuntu-01-ci",       "runnerLabels": ["self-hosted","ubuntu","x64"] },
+  { "vmName": "ubuntu-01-ci", ..., "githubUrl": "https://github.com/user/repo-a",
+    "runnerName": "ubuntu-01-ci-infra", "runnerLabels": ["self-hosted","ubuntu","x64","infra"] },
+  { "vmName": "ubuntu-01-ci", ..., "githubUrl": "https://github.com/user/repo-b",
+    "runnerName": "ubuntu-01-ci-repo-b","runnerLabels": ["self-hosted","ubuntu","x64"] }
+]
+```
+
+---
+
+## Idempotency
+
+Re-running `register-runners.ps1` is safe:
+
+- The runner tarball is downloaded once per version and cached at
+  `/home/u-actions-runner/cache/`. Subsequent runs skip the download.
+- Runner directories (`/home/u-actions-runner/runners/{runnerName}/`) are
+  only extracted if absent.
+- Runner registration and service management (Step 5, not yet implemented)
+  will also be idempotent: existing healthy runners are skipped.
+
+---
+
+## Repo structure
+
+```
+hyper-v/ubuntu/
+  setup-secrets.ps1         Store runner config in the local vault
+  register-runners.ps1      Orchestrator - runs all steps below
+  resolve/                  Step 3: vault reads and pre-SSH validation
+    ConvertFrom-GitHubRunnersConfigJson.ps1
+    Read-GitHubPat.ps1
+    Read-GitHubRunnersConfig.ps1
+    Read-VmDeployPasswords.ps1
+    Join-RunnerDeployCredentials.ps1
+    Test-RunnerVmConnectivity.ps1
+  install/                  Step 4: runner binary installation via SSH
+    Resolve-RunnerVersion.ps1
+    Invoke-TarballDownload.ps1
+    Invoke-RunnerExtract.ps1
+    Invoke-RunnerInstall.ps1
+Tests/
+  *.Tests.ps1               Unit tests (one file per production file)
+  Integration/              Integration tests (require a live SSH target via Docker)
+```
