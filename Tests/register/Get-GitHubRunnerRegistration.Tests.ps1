@@ -1,5 +1,5 @@
 BeforeAll {
-    . "$PSScriptRoot\..\hyper-v\ubuntu\register\Get-GitHubRunnerRegistration.ps1"
+    . "$PSScriptRoot\..\..\hyper-v\ubuntu\register\Get-GitHubRunnerRegistration.ps1"
 }
 
 Describe 'Get-GitHubRunnerRegistration' {
@@ -71,6 +71,34 @@ Describe 'Get-GitHubRunnerRegistration' {
                 -RunnerName 'runner-a'
 
             $result | Should -BeNullOrEmpty
+        }
+
+        It 'returns $null when the response has no runners property' {
+            Mock Invoke-RestMethod { @{} }
+
+            $result = Get-GitHubRunnerRegistration `
+                -Pat        'ghp_test' `
+                -GithubUrl  'https://github.com/user/repo-a' `
+                -RunnerName 'runner-a'
+
+            $result | Should -BeNullOrEmpty
+        }
+
+        It 'returns only the first match when multiple runners share the same name' {
+            Mock Invoke-RestMethod {
+                @{ runners = @(
+                    @{ name = 'runner-a'; id = 1 },
+                    @{ name = 'runner-a'; id = 2 }
+                )}
+            }
+
+            $result = Get-GitHubRunnerRegistration `
+                -Pat        'ghp_test' `
+                -GithubUrl  'https://github.com/user/repo-a' `
+                -RunnerName 'runner-a'
+
+            @($result).Count | Should -Be 1
+            $result.id       | Should -Be 1
         }
     }
 }
