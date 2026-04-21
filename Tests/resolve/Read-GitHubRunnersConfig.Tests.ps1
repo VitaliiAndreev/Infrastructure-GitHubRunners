@@ -2,7 +2,7 @@ BeforeAll {
     function Get-InfrastructureSecret         { param($VaultName, $SecretName) }
     function ConvertFrom-GitHubRunnersConfigJson { param($Json) }
 
-    . "$PSScriptRoot\..\hyper-v\ubuntu\resolve\Read-GitHubRunnersConfig.ps1"
+    . "$PSScriptRoot\..\..\hyper-v\ubuntu\resolve\Read-GitHubRunnersConfig.ps1"
 }
 
 Describe 'Read-GitHubRunnersConfig' {

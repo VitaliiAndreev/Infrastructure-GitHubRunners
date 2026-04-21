@@ -1,5 +1,5 @@
 BeforeAll {
-    . "$PSScriptRoot\..\hyper-v\ubuntu\resolve\Join-RunnerDeployCredentials.ps1"
+    . "$PSScriptRoot\..\..\hyper-v\ubuntu\resolve\Join-RunnerDeployCredentials.ps1"
 
     function New-RunnerEntry {
         param(
