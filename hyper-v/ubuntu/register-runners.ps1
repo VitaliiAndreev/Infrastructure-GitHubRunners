@@ -18,13 +18,11 @@
     .\register-runners.ps1
 #>
 
-# These variables are assigned here and consumed by Steps 4 and 5, which are
-# not yet implemented. The suppress attributes prevent false PSScriptAnalyzer
-# warnings until those steps are added.
+# pat is assigned here and consumed by Step 5, which is not yet implemented.
+# The suppress attribute prevents a false PSScriptAnalyzer warning until
+# that step is added.
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSUseDeclaredVarsMoreThanAssignments', 'pat')]
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSUseDeclaredVarsMoreThanAssignments', 'reachable')]
 [CmdletBinding()]
 param()
 
@@ -52,8 +50,11 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 . "$PSScriptRoot\resolve\Read-VmDeployPasswords.ps1"
 . "$PSScriptRoot\resolve\Join-RunnerDeployCredentials.ps1"
 . "$PSScriptRoot\resolve\Test-RunnerVmConnectivity.ps1"
-# TODO: Step 4 - . "$PSScriptRoot\install-runners.ps1"
-# TODO: Step 5 - . "$PSScriptRoot\register-service.ps1"
+. "$PSScriptRoot\install\Resolve-RunnerVersion.ps1"
+. "$PSScriptRoot\install\Invoke-TarballDownload.ps1"
+. "$PSScriptRoot\install\Invoke-RunnerExtract.ps1"
+. "$PSScriptRoot\install\Invoke-RunnerInstall.ps1"
+# TODO: Step 5 - . "$PSScriptRoot\register\register-service.ps1"
 
 # Infrastructure.Secrets provides Get-InfrastructureSecret and
 # Use-MicrosoftPowerShellSecretStoreProvider used below.
@@ -79,8 +80,9 @@ Use-MicrosoftPowerShellSecretStoreProvider
 
 # ---------------------------------------------------------------------------
 # Prompt for the GitHub PAT
-#    The PAT is held in memory only. It is used in Steps 4-5 to fetch
-#    registration tokens and list existing runners via the GitHub API.
+#    The PAT is held in memory only. It authenticates the GitHub Releases
+#    API call (Step 4) and will be used in Step 5 to fetch registration
+#    tokens and list existing runners via the GitHub API.
 #    Required scope: 'repo' for private repos, 'public_repo' for public.
 # ---------------------------------------------------------------------------
 
@@ -111,8 +113,63 @@ $targets = @(Join-RunnerDeployCredentials `
 $reachable = @(Test-RunnerVmConnectivity -Targets $targets)
 
 # ---------------------------------------------------------------------------
-# TODO: Step 4 - Install runner binary via SSH
+# Resolve the latest runner version once - all VMs receive the same binary.
 # ---------------------------------------------------------------------------
+
+$runnerVersion = Resolve-RunnerVersion -Pat $pat
+
+# ---------------------------------------------------------------------------
+# Install runner binary via SSH
+#   Group reachable entries by VM so one SSH connection handles all runners
+#   on a host. Open the connection as u-runner-deploy - admin credentials
+#   are not used or stored in this repo (see plan.md prerequisites).
+#
+#   Security: deployPassword must never appear in SSH commands, console
+#   output, or error messages. Log only vmName and deployUsername.
+#
+#   SSH.NET is used directly (not Posh-SSH cmdlets) - see the Posh-SSH
+#   comment above for why.
+# ---------------------------------------------------------------------------
+
+$vmGroups = $reachable | Group-Object { $_.Entry.vmName }
+
+foreach ($group in $vmGroups) {
+    $first     = $group.Group[0]
+    $vmName    = $first.Entry.vmName
+    $ipAddress = $first.Entry.ipAddress
+    $username  = $first.Entry.deployUsername
+    # Plain string - see resolve\Read-VmDeployPasswords.ps1 for rationale.
+    $password  = $first.Password
+
+    Write-Host ""
+    Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
+
+    $sshClient = $null
+
+    try {
+        $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
+                         $username, $password)
+        $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
+                         $ipAddress, $username, @($auth))
+        $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
+        $sshClient.Connect()
+
+        Invoke-RunnerInstall `
+            -SshClient      $sshClient `
+            -VmName         $vmName `
+            -RunnerEntries  @($group.Group | ForEach-Object { $_.Entry }) `
+            -RunnerVersion  $runnerVersion
+    }
+    catch [Renci.SshNet.Common.SshConnectionException] {
+        Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
+    }
+    finally {
+        if ($null -ne $sshClient) {
+            if ($sshClient.IsConnected) { $sshClient.Disconnect() }
+            $sshClient.Dispose()
+        }
+    }
+}
 
 # ---------------------------------------------------------------------------
 # TODO: Step 5 - Register runner and ensure service is running
