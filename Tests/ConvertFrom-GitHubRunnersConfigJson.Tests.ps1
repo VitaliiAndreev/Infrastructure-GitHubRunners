@@ -16,6 +16,7 @@ BeforeAll {
             [string] $VmName         = 'ubuntu-01-ci',
             [string] $IpAddress      = '192.168.1.101',
             [string] $DeployUser     = 'u-runner-deploy',
+            [string] $RunnerUser     = 'u-actions-runner',
             [string] $GithubUrl      = 'https://github.com/user/repo',
             [string] $RunnerName     = 'ubuntu-01-ci',
             [string] $LabelsJson     = '["self-hosted","ubuntu","x64"]'
@@ -25,6 +26,7 @@ BeforeAll {
     "vmName":          "$VmName",
     "ipAddress":       "$IpAddress",
     "deployUsername":  "$DeployUser",
+    "runnerUsername":  "$RunnerUser",
     "githubUrl":       "$GithubUrl",
     "runnerName":      "$RunnerName",
     "runnerLabels":    $LabelsJson
@@ -100,13 +102,14 @@ Describe 'ConvertFrom-GitHubRunnersConfigJson' {
             Should -Invoke Assert-RequiredProperties -Times 2 -Exactly
         }
 
-        It 'passes all six required field names to Assert-RequiredProperties' {
+        It 'passes all seven required field names to Assert-RequiredProperties' {
             Mock Assert-RequiredProperties {}
             @(ConvertFrom-GitHubRunnersConfigJson -Json (ConvertTo-JsonArray (New-ValidEntryJson)))
             Should -Invoke Assert-RequiredProperties -Times 1 -Exactly -ParameterFilter {
                 $Properties -contains 'vmName'          -and
                 $Properties -contains 'ipAddress'       -and
                 $Properties -contains 'deployUsername'  -and
+                $Properties -contains 'runnerUsername'  -and
                 $Properties -contains 'githubUrl'       -and
                 $Properties -contains 'runnerName'      -and
                 $Properties -contains 'runnerLabels'

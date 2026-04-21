@@ -44,7 +44,8 @@ function ConvertFrom-GitHubRunnersConfigJson {
         Assert-RequiredProperties `
             -Object     $entry `
             -Properties @('vmName', 'ipAddress', 'deployUsername',
-                          'githubUrl', 'runnerName', 'runnerLabels') `
+                          'runnerUsername', 'githubUrl', 'runnerName',
+                          'runnerLabels') `
             -Context    "Runner entry"
 
         # runnerLabels must be a non-empty array. @() normalises PS 5.1
