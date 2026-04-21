@@ -37,12 +37,15 @@ function Invoke-RunnerExtract {
         [string] $RunnerVersion,
 
         [Parameter(Mandatory)]
-        [string] $RunnerName
-    )
+        [string] $RunnerName,
 
-    $tarPath   = "/home/$RunnerUser/cache/" +
-                 "actions-runner-linux-x64-${RunnerVersion}.tar.gz"
-    $runnerDir = "/home/$RunnerUser/runners/$RunnerName"
+        # Pre-computed by Get-RunnerPaths - caller owns path convention.
+        [Parameter(Mandatory)]
+        [string] $RunnerDir,
+
+        [Parameter(Mandatory)]
+        [string] $TarPath
+    )
 
     $check = Invoke-SshClientCommand `
         -SshClient $SshClient `
@@ -55,7 +58,7 @@ function Invoke-RunnerExtract {
         return
     }
 
-    # mkdir -p creates /home/$RunnerUser/runners/ implicitly.
+    # mkdir -p on the full runner path creates the runners/ parent implicitly.
     $mkdir = Invoke-SshClientCommand `
         -SshClient $SshClient `
         -Command   "sudo -u $RunnerUser mkdir -p '$runnerDir'" `

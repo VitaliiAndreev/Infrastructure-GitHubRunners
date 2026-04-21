@@ -3,9 +3,11 @@ BeforeAll {
         param($SshClient, $Command, $ErrorAction)
     }
 
-    . "$PSScriptRoot\..\hyper-v\ubuntu\install\Invoke-TarballDownload.ps1"
+    . "$PSScriptRoot\..\..\hyper-v\ubuntu\install\Invoke-TarballDownload.ps1"
 
-    $Script:FakeSsh = [PSCustomObject] @{}
+    $Script:FakeSsh  = [PSCustomObject] @{}
+    $Script:CacheDir = '/home/u-actions-runner/cache'
+    $Script:TarPath  = '/home/u-actions-runner/cache/actions-runner-linux-x64-2.317.0.tar.gz'
 }
 
 Describe 'Invoke-TarballDownload' {
@@ -18,10 +20,12 @@ Describe 'Invoke-TarballDownload' {
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
-                -RunnerVersion '2.317.0'
+                -RunnerVersion '2.317.0' `
+                -CacheDir      $Script:CacheDir `
+                -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
-                $Command -like "sudo -u u-actions-runner mkdir -p '/home/u-actions-runner/cache'"
+                $Command -like "sudo -u u-actions-runner mkdir -p '$Script:CacheDir'"
             }
         }
 
@@ -32,7 +36,9 @@ Describe 'Invoke-TarballDownload' {
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
-                -RunnerVersion '2.317.0'
+                -RunnerVersion '2.317.0' `
+                -CacheDir      $Script:CacheDir `
+                -TarPath       $Script:TarPath
             } | Should -Throw '*Failed to create cache directory*'
         }
     }
@@ -48,7 +54,9 @@ Describe 'Invoke-TarballDownload' {
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
-                -RunnerVersion '2.317.0'
+                -RunnerVersion '2.317.0' `
+                -CacheDir      $Script:CacheDir `
+                -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*curl*'
@@ -73,10 +81,12 @@ Describe 'Invoke-TarballDownload' {
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
-                -RunnerVersion '2.317.0'
+                -RunnerVersion '2.317.0' `
+                -CacheDir      $Script:CacheDir `
+                -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
-                $Command -like "*rm -f '/home/u-actions-runner/cache'/actions-runner-*.tar.gz"
+                $Command -like "*rm -f '$Script:CacheDir'/actions-runner-*.tar.gz"
             }
         }
 
@@ -85,7 +95,9 @@ Describe 'Invoke-TarballDownload' {
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
-                -RunnerVersion '2.317.0'
+                -RunnerVersion '2.317.0' `
+                -CacheDir      $Script:CacheDir `
+                -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
                 $Command -like '*curl*' -and $Command -like '*2.317.0*'
@@ -105,7 +117,9 @@ Describe 'Invoke-TarballDownload' {
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
-                -RunnerVersion '2.317.0'
+                -RunnerVersion '2.317.0' `
+                -CacheDir      $Script:CacheDir `
+                -TarPath       $Script:TarPath
             } | Should -Throw '*Failed to purge stale tarballs*'
         }
 
@@ -122,7 +136,9 @@ Describe 'Invoke-TarballDownload' {
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
-                -RunnerVersion '2.317.0'
+                -RunnerVersion '2.317.0' `
+                -CacheDir      $Script:CacheDir `
+                -TarPath       $Script:TarPath
             } | Should -Throw '*curl download failed*'
         }
     }

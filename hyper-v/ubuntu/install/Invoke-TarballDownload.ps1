@@ -35,12 +35,17 @@ function Invoke-TarballDownload {
 
         # Version string without leading 'v', e.g. '2.317.0'.
         [Parameter(Mandatory)]
-        [string] $RunnerVersion
+        [string] $RunnerVersion,
+
+        # Pre-computed by Get-RunnerPaths - caller owns path convention.
+        [Parameter(Mandatory)]
+        [string] $CacheDir,
+
+        [Parameter(Mandatory)]
+        [string] $TarPath
     )
 
-    $cacheDir = "/home/$RunnerUser/cache"
     $tarball  = "actions-runner-linux-x64-${RunnerVersion}.tar.gz"
-    $tarPath  = "$cacheDir/$tarball"
     $tarUrl   = "https://github.com/actions/runner/releases/download/" +
                 "v${RunnerVersion}/${tarball}"
 

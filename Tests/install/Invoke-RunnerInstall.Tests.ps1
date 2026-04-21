@@ -1,8 +1,11 @@
 BeforeAll {
-    function Invoke-TarballDownload { param($SshClient, $VmName, $RunnerUser, $RunnerVersion) }
-    function Invoke-RunnerExtract   { param($SshClient, $VmName, $RunnerUser, $RunnerVersion, $RunnerName) }
+    function Get-RunnerPaths        { param($RunnerUser, $RunnerVersion, $RunnerName)
+        [PSCustomObject] @{ CacheDir = '/cache'; TarPath = '/cache/runner.tar.gz'
+                            RunnerDir = "/runners/$RunnerName" } }
+    function Invoke-TarballDownload { param($SshClient, $VmName, $RunnerUser, $RunnerVersion, $CacheDir, $TarPath) }
+    function Invoke-RunnerExtract   { param($SshClient, $VmName, $RunnerUser, $RunnerVersion, $RunnerName, $RunnerDir, $TarPath) }
 
-    . "$PSScriptRoot\..\hyper-v\ubuntu\install\Invoke-RunnerInstall.ps1"
+    . "$PSScriptRoot\..\..\hyper-v\ubuntu\install\Invoke-RunnerInstall.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}
 
@@ -79,7 +82,7 @@ Describe 'Invoke-RunnerInstall' {
     }
 
     Context 'runner user derivation' {
-        It 'derives the runner user from the first entry' {
+        It 'derives the runner user from the entries' {
             Mock Invoke-TarballDownload {}
             Mock Invoke-RunnerExtract   {}
 
@@ -95,6 +98,18 @@ Describe 'Invoke-RunnerInstall' {
             Should -Invoke Invoke-RunnerExtract -Times 1 -ParameterFilter {
                 $RunnerUser -eq 'svc-runner'
             }
+        }
+
+        It 'throws when entries on the same VM have different runnerUsername values' {
+            Mock Invoke-TarballDownload {}
+            Mock Invoke-RunnerExtract   {}
+
+            { Invoke-RunnerInstall `
+                -SshClient     $Script:FakeSsh `
+                -VmName        'vm-01' `
+                -RunnerEntries @(New-Entry 'runner-a' 'user-one'; New-Entry 'runner-b' 'user-two') `
+                -RunnerVersion '2.317.0'
+            } | Should -Throw '*All runner entries on a VM must share the same runnerUsername*'
         }
     }
 }

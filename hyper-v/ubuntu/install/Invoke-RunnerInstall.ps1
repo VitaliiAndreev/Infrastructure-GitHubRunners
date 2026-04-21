@@ -34,23 +34,40 @@ function Invoke-RunnerInstall {
         [string] $RunnerVersion
     )
 
-    # All entries are for the same VM so runnerUsername is the same for all.
-    # Home directory is derived by convention (/home/{username}) - the same
-    # convention used by useradd -m in Infrastructure-Vm-Users.
-    $runnerUser = $RunnerEntries[0].runnerUsername
+    # Guard: caller is expected to pass entries pre-grouped by runnerUsername
+    # (register-runners.ps1 groups by vmName then by runnerUsername before
+    # calling this function). Mixed users here would install files under the
+    # wrong home directory, so fail fast rather than silently misattribute.
+    $distinctUsers = @($RunnerEntries | Select-Object -ExpandProperty runnerUsername -Unique)
+    if ($distinctUsers.Count -gt 1) {
+        throw ("[$VmName] All runner entries on a VM must share the same " +
+            "runnerUsername. Found: $($distinctUsers -join ', ')")
+    }
+    $runnerUser = $distinctUsers[0]
+
+    $userPaths = Get-RunnerPaths -RunnerUser $runnerUser -RunnerVersion $RunnerVersion
 
     Invoke-TarballDownload `
         -SshClient     $SshClient `
         -VmName        $VmName `
         -RunnerUser    $runnerUser `
-        -RunnerVersion $RunnerVersion
+        -RunnerVersion $RunnerVersion `
+        -CacheDir      $userPaths.CacheDir `
+        -TarPath       $userPaths.TarPath
 
     foreach ($entry in $RunnerEntries) {
+        $entryPaths = Get-RunnerPaths `
+            -RunnerUser    $runnerUser `
+            -RunnerVersion $RunnerVersion `
+            -RunnerName    $entry.runnerName
+
         Invoke-RunnerExtract `
             -SshClient     $SshClient `
             -VmName        $VmName `
             -RunnerUser    $runnerUser `
             -RunnerVersion $RunnerVersion `
-            -RunnerName    $entry.runnerName
+            -RunnerName    $entry.runnerName `
+            -RunnerDir     $entryPaths.RunnerDir `
+            -TarPath       $entryPaths.TarPath
     }
 }

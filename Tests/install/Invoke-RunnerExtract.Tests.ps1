@@ -3,9 +3,11 @@ BeforeAll {
         param($SshClient, $Command, $ErrorAction)
     }
 
-    . "$PSScriptRoot\..\hyper-v\ubuntu\install\Invoke-RunnerExtract.ps1"
+    . "$PSScriptRoot\..\..\hyper-v\ubuntu\install\Invoke-RunnerExtract.ps1"
 
-    $Script:FakeSsh = [PSCustomObject] @{}
+    $Script:FakeSsh   = [PSCustomObject] @{}
+    $Script:RunnerDir = '/home/u-actions-runner/runners/runner-a'
+    $Script:TarPath   = '/home/u-actions-runner/cache/actions-runner-linux-x64-2.317.0.tar.gz'
 }
 
 Describe 'Invoke-RunnerExtract' {
@@ -19,7 +21,9 @@ Describe 'Invoke-RunnerExtract' {
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
                 -RunnerVersion '2.317.0' `
-                -RunnerName    'runner-a'
+                -RunnerName    'runner-a' `
+                -RunnerDir     $Script:RunnerDir `
+                -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
                 $Command -like '*tar -xzf*'
@@ -45,10 +49,12 @@ Describe 'Invoke-RunnerExtract' {
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
                 -RunnerVersion '2.317.0' `
-                -RunnerName    'runner-a'
+                -RunnerName    'runner-a' `
+                -RunnerDir     $Script:RunnerDir `
+                -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
-                $Command -like "sudo -u u-actions-runner mkdir -p '/home/u-actions-runner/runners/runner-a'"
+                $Command -like "sudo -u u-actions-runner mkdir -p '$Script:RunnerDir'"
             }
         }
 
@@ -58,12 +64,12 @@ Describe 'Invoke-RunnerExtract' {
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
                 -RunnerVersion '2.317.0' `
-                -RunnerName    'runner-a'
+                -RunnerName    'runner-a' `
+                -RunnerDir     $Script:RunnerDir `
+                -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
-                $Command -like ("sudo -u u-actions-runner tar -xzf " +
-                    "'/home/u-actions-runner/cache/actions-runner-linux-x64-2.317.0.tar.gz'" +
-                    " -C '/home/u-actions-runner/runners/runner-a'")
+                $Command -like "sudo -u u-actions-runner tar -xzf '$Script:TarPath' -C '$Script:RunnerDir'"
             }
         }
 
@@ -81,7 +87,9 @@ Describe 'Invoke-RunnerExtract' {
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
                 -RunnerVersion '2.317.0' `
-                -RunnerName    'runner-a'
+                -RunnerName    'runner-a' `
+                -RunnerDir     $Script:RunnerDir `
+                -TarPath       $Script:TarPath
             } | Should -Throw '*Failed to create runner directory*'
         }
 
@@ -99,7 +107,9 @@ Describe 'Invoke-RunnerExtract' {
                 -VmName        'vm-01' `
                 -RunnerUser    'u-actions-runner' `
                 -RunnerVersion '2.317.0' `
-                -RunnerName    'runner-a'
+                -RunnerName    'runner-a' `
+                -RunnerDir     $Script:RunnerDir `
+                -TarPath       $Script:TarPath
             } | Should -Throw '*tar extraction failed*'
         }
     }
