@@ -83,9 +83,10 @@ The PAT is prompted at runtime and never stored. Required scopes:
 | Private | `repo` |
 | Public | `public_repo` |
 
-The PAT is used to authenticate the GitHub Releases API request that resolves
-the latest runner version, and will also be used in Step 5 (not yet
-implemented) to list existing runners and fetch registration tokens.
+The PAT is used to:
+- resolve the latest runner version via the GitHub Releases API,
+- check existing runner registration via the GitHub Runners API,
+- fetch short-lived registration tokens.
 
 ---
 
@@ -126,11 +127,15 @@ Example config for one VM covering two repos with dedicated infra runners:
 Re-running `register-runners.ps1` is safe:
 
 - The runner tarball is downloaded once per version and cached at
-  `/home/u-actions-runner/cache/`. Subsequent runs skip the download.
-- Runner directories (`/home/u-actions-runner/runners/{runnerName}/`) are
+  `/home/{runnerUsername}/cache/`. Subsequent runs skip the download.
+- Runner directories (`/home/{runnerUsername}/runners/{runnerName}/`) are
   only extracted if absent.
-- Runner registration and service management (Step 5, not yet implemented)
-  will also be idempotent: existing healthy runners are skipped.
+- Runners already registered on GitHub with an active systemd service are
+  detected and skipped.
+- Runners registered but with a stopped service are restarted without
+  re-registering.
+- Runners not registered at all go through full registration, service
+  install, and start.
 
 ---
 
@@ -140,18 +145,27 @@ Re-running `register-runners.ps1` is safe:
 hyper-v/ubuntu/
   setup-secrets.ps1         Store runner config in the local vault
   register-runners.ps1      Orchestrator - runs all steps below
-  resolve/                  Step 3: vault reads and pre-SSH validation
+  resolve/                  Step 3: vault reads, pre-SSH validation, path conventions
     ConvertFrom-GitHubRunnersConfigJson.ps1
     Read-GitHubPat.ps1
     Read-GitHubRunnersConfig.ps1
     Read-VmDeployPasswords.ps1
     Join-RunnerDeployCredentials.ps1
     Test-RunnerVmConnectivity.ps1
+    Get-RunnerPaths.ps1
+  Invoke-VmRunnerGroup.ps1  Per-VM orchestration (install + reconcile all runners)
   install/                  Step 4: runner binary installation via SSH
     Resolve-RunnerVersion.ps1
     Invoke-TarballDownload.ps1
     Invoke-RunnerExtract.ps1
     Invoke-RunnerInstall.ps1
+  register/                 Step 5: runner registration and service management
+    Get-GitHubRunnerRegistration.ps1
+    New-RunnerRegistrationToken.ps1
+    Get-RunnerServiceName.ps1
+    Test-RunnerServiceActive.ps1
+    Start-RunnerService.ps1
+    Invoke-RunnerRegistration.ps1
 Tests/
   *.Tests.ps1               Unit tests (one file per production file)
   Integration/              Integration tests (require a live SSH target via Docker)
