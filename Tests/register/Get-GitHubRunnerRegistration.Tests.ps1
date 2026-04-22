@@ -37,9 +37,9 @@ Describe 'Get-GitHubRunnerRegistration' {
     Context 'return value' {
         It 'returns the matching runner object when the runner is registered' {
             Mock Invoke-RestMethod {
-                @{ runners = @(
-                    @{ name = 'other-runner'; id = 1 },
-                    @{ name = 'runner-a';    id = 2 }
+                [PSCustomObject]@{ runners = @(
+                    [PSCustomObject]@{ name = 'other-runner'; id = 1 },
+                    [PSCustomObject]@{ name = 'runner-a';    id = 2 }
                 )}
             }
 
@@ -52,7 +52,9 @@ Describe 'Get-GitHubRunnerRegistration' {
         }
 
         It 'returns $null when the runner is not in the list' {
-            Mock Invoke-RestMethod { @{ runners = @(@{ name = 'other-runner'; id = 1 }) } }
+            Mock Invoke-RestMethod {
+                [PSCustomObject]@{ runners = @([PSCustomObject]@{ name = 'other-runner'; id = 1 }) }
+            }
 
             $result = Get-GitHubRunnerRegistration `
                 -Pat        'ghp_test' `
@@ -63,7 +65,7 @@ Describe 'Get-GitHubRunnerRegistration' {
         }
 
         It 'returns $null when the runners list is empty' {
-            Mock Invoke-RestMethod { @{ runners = @() } }
+            Mock Invoke-RestMethod { [PSCustomObject]@{ runners = @() } }
 
             $result = Get-GitHubRunnerRegistration `
                 -Pat        'ghp_test' `
@@ -74,7 +76,7 @@ Describe 'Get-GitHubRunnerRegistration' {
         }
 
         It 'returns $null when the response has no runners property' {
-            Mock Invoke-RestMethod { @{} }
+            Mock Invoke-RestMethod { [PSCustomObject]@{} }
 
             $result = Get-GitHubRunnerRegistration `
                 -Pat        'ghp_test' `
@@ -86,9 +88,9 @@ Describe 'Get-GitHubRunnerRegistration' {
 
         It 'returns only the first match when multiple runners share the same name' {
             Mock Invoke-RestMethod {
-                @{ runners = @(
-                    @{ name = 'runner-a'; id = 1 },
-                    @{ name = 'runner-a'; id = 2 }
+                [PSCustomObject]@{ runners = @(
+                    [PSCustomObject]@{ name = 'runner-a'; id = 1 },
+                    [PSCustomObject]@{ name = 'runner-a'; id = 2 }
                 )}
             }
 
