@@ -11,18 +11,13 @@
     Prerequisites:
     - setup-secrets.ps1 has been run at least once on this machine.
     - VMs are provisioned (Infrastructure-Vm-Provisioner) and reachable.
-    - u-runner-deploy and u-actions-runner exist on each VM
+    - Deploy user and runner service user exist on each VM
       (Infrastructure-Vm-Users).
 
 .EXAMPLE
     .\register-runners.ps1
 #>
 
-# pat is assigned here and consumed by Step 5, which is not yet implemented.
-# The suppress attribute prevents a false PSScriptAnalyzer warning until
-# that step is added.
-[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
-    'PSUseDeclaredVarsMoreThanAssignments', 'pat')]
 [CmdletBinding()]
 param()
 
@@ -50,11 +45,18 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 . "$PSScriptRoot\resolve\Read-VmDeployPasswords.ps1"
 . "$PSScriptRoot\resolve\Join-RunnerDeployCredentials.ps1"
 . "$PSScriptRoot\resolve\Test-RunnerVmConnectivity.ps1"
+. "$PSScriptRoot\resolve\Get-RunnerPaths.ps1"
 . "$PSScriptRoot\install\Resolve-RunnerVersion.ps1"
 . "$PSScriptRoot\install\Invoke-TarballDownload.ps1"
 . "$PSScriptRoot\install\Invoke-RunnerExtract.ps1"
 . "$PSScriptRoot\install\Invoke-RunnerInstall.ps1"
-# TODO: Step 5 - . "$PSScriptRoot\register\register-service.ps1"
+. "$PSScriptRoot\register\Get-GitHubRunnerRegistration.ps1"
+. "$PSScriptRoot\register\New-RunnerRegistrationToken.ps1"
+. "$PSScriptRoot\register\Get-RunnerServiceName.ps1"
+. "$PSScriptRoot\register\Test-RunnerServiceActive.ps1"
+. "$PSScriptRoot\register\Start-RunnerService.ps1"
+. "$PSScriptRoot\register\Invoke-RunnerRegistration.ps1"
+. "$PSScriptRoot\Invoke-VmRunnerGroup.ps1"
 
 # Infrastructure.Secrets provides Get-InfrastructureSecret and
 # Use-MicrosoftPowerShellSecretStoreProvider used below.
@@ -80,9 +82,9 @@ Use-MicrosoftPowerShellSecretStoreProvider
 
 # ---------------------------------------------------------------------------
 # Prompt for the GitHub PAT
-#    The PAT is held in memory only. It authenticates the GitHub Releases
-#    API call (Step 4) and will be used in Step 5 to fetch registration
-#    tokens and list existing runners via the GitHub API.
+#    Held in memory only. Used to authenticate GitHub API calls: resolving
+#    the latest runner version, checking runner registration status, and
+#    fetching short-lived registration tokens.
 #    Required scope: 'repo' for private repos, 'public_repo' for public.
 # ---------------------------------------------------------------------------
 
@@ -119,13 +121,14 @@ $reachable = @(Test-RunnerVmConnectivity -Targets $targets)
 $runnerVersion = Resolve-RunnerVersion -Pat $pat
 
 # ---------------------------------------------------------------------------
-# Install runner binary via SSH
+# Install runner binary and register each runner via SSH
 #   Group reachable entries by VM so one SSH connection handles all runners
-#   on a host. Open the connection as u-runner-deploy - admin credentials
+#   on a host. Open the connection as the deploy user - admin credentials
 #   are not used or stored in this repo (see plan.md prerequisites).
 #
 #   Security: deployPassword must never appear in SSH commands, console
 #   output, or error messages. Log only vmName and deployUsername.
+#   Registration tokens are treated with the same care.
 #
 #   SSH.NET is used directly (not Posh-SSH cmdlets) - see the Posh-SSH
 #   comment above for why.
@@ -154,11 +157,12 @@ foreach ($group in $vmGroups) {
         $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
         $sshClient.Connect()
 
-        Invoke-RunnerInstall `
-            -SshClient      $sshClient `
-            -VmName         $vmName `
-            -RunnerEntries  @($group.Group | ForEach-Object { $_.Entry }) `
-            -RunnerVersion  $runnerVersion
+        Invoke-VmRunnerGroup `
+            -SshClient     $sshClient `
+            -VmName        $vmName `
+            -Targets       $group.Group `
+            -RunnerVersion $runnerVersion `
+            -Pat           $pat
     }
     catch [Renci.SshNet.Common.SshConnectionException] {
         Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
@@ -170,7 +174,3 @@ foreach ($group in $vmGroups) {
         }
     }
 }
-
-# ---------------------------------------------------------------------------
-# TODO: Step 5 - Register runner and ensure service is running
-# ---------------------------------------------------------------------------
