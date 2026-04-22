@@ -45,5 +45,11 @@ function Get-GitHubRunnerRegistration {
         } `
         -ErrorAction Stop
 
-    $response.runners | Where-Object { $_.name -eq $RunnerName } | Select-Object -First 1
+    # Select-Object -ErrorAction SilentlyContinue guards against an absent
+    # 'runners' property under Set-StrictMode -Version Latest, which would
+    # otherwise throw PropertyNotFoundException.
+    $response |
+        Select-Object -ExpandProperty runners -ErrorAction SilentlyContinue |
+        Where-Object { $_.name -eq $RunnerName } |
+        Select-Object -First 1
 }
