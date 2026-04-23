@@ -1,42 +1,29 @@
 BeforeAll {
+    function Invoke-GitHubRunnersApi { param($Pat, $GithubUrl, $Suffix, $Method) }
+
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\github\Get-GitHubRunnerRegistration.ps1"
 }
 
 Describe 'Get-GitHubRunnerRegistration' {
 
     Context 'API request' {
-        It 'calls the runners endpoint with the correct URI, headers, and per_page' {
-            Mock Invoke-RestMethod { @{ runners = @() } }
+        It 'queries the runners collection with per_page=100' {
+            Mock Invoke-GitHubRunnersApi { [PSCustomObject] @{ runners = @() } }
 
             Get-GitHubRunnerRegistration `
                 -Pat        'ghp_test' `
                 -GithubUrl  'https://github.com/user/repo-a' `
                 -RunnerName 'runner-a'
 
-            Should -Invoke Invoke-RestMethod -Times 1 -ParameterFilter {
-                $Uri -eq 'https://api.github.com/repos/user/repo-a/actions/runners?per_page=100' -and
-                $Headers['Authorization'] -eq 'Bearer ghp_test' -and
-                $Headers['User-Agent']    -eq 'Infrastructure-GitHubRunners'
-            }
-        }
-
-        It 'parses owner and repo from a URL with a trailing slash' {
-            Mock Invoke-RestMethod { @{ runners = @() } }
-
-            Get-GitHubRunnerRegistration `
-                -Pat        'ghp_test' `
-                -GithubUrl  'https://github.com/user/repo-a/' `
-                -RunnerName 'runner-a'
-
-            Should -Invoke Invoke-RestMethod -Times 1 -ParameterFilter {
-                $Uri -like '*repos/user/repo-a/actions/runners*'
+            Should -Invoke Invoke-GitHubRunnersApi -Times 1 -ParameterFilter {
+                $Suffix -eq '?per_page=100'
             }
         }
     }
 
     Context 'return value' {
         It 'returns the matching runner object when the runner is registered' {
-            Mock Invoke-RestMethod {
+            Mock Invoke-GitHubRunnersApi {
                 [PSCustomObject]@{ runners = @(
                     [PSCustomObject]@{ name = 'other-runner'; id = 1 },
                     [PSCustomObject]@{ name = 'runner-a';    id = 2 }
@@ -52,7 +39,7 @@ Describe 'Get-GitHubRunnerRegistration' {
         }
 
         It 'returns $null when the runner is not in the list' {
-            Mock Invoke-RestMethod {
+            Mock Invoke-GitHubRunnersApi {
                 [PSCustomObject]@{ runners = @([PSCustomObject]@{ name = 'other-runner'; id = 1 }) }
             }
 
@@ -65,7 +52,7 @@ Describe 'Get-GitHubRunnerRegistration' {
         }
 
         It 'returns $null when the runners list is empty' {
-            Mock Invoke-RestMethod { [PSCustomObject]@{ runners = @() } }
+            Mock Invoke-GitHubRunnersApi { [PSCustomObject]@{ runners = @() } }
 
             $result = Get-GitHubRunnerRegistration `
                 -Pat        'ghp_test' `
@@ -76,7 +63,7 @@ Describe 'Get-GitHubRunnerRegistration' {
         }
 
         It 'returns $null when the response has no runners property' {
-            Mock Invoke-RestMethod { [PSCustomObject]@{} }
+            Mock Invoke-GitHubRunnersApi { [PSCustomObject]@{} }
 
             $result = Get-GitHubRunnerRegistration `
                 -Pat        'ghp_test' `
@@ -87,7 +74,7 @@ Describe 'Get-GitHubRunnerRegistration' {
         }
 
         It 'returns only the first match when multiple runners share the same name' {
-            Mock Invoke-RestMethod {
+            Mock Invoke-GitHubRunnersApi {
                 [PSCustomObject]@{ runners = @(
                     [PSCustomObject]@{ name = 'runner-a'; id = 1 },
                     [PSCustomObject]@{ name = 'runner-a'; id = 2 }

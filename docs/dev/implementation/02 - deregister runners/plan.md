@@ -4,7 +4,7 @@
 - [Prerequisites](#prerequisites)
 - [Conventions](#conventions)
 - [Step 1 - Restructure existing folders](#step-1---restructure-existing-folders)
-- [Step 2 - New-RunnerRemovalToken](#step-2---new-runnerremovaltoken)
+- [Step 2 - Invoke-GitHubRunnersApi](#step-2---invoke-githubrunnerapi)
 - [Step 3 - Remove-GitHubRunner](#step-3---remove-githubrunner)
 - [Step 4 - Remove-RunnerService](#step-4---remove-runnerservice)
 - [Step 5 - Invoke-RunnerConfigRemove](#step-5---invoke-runnerconfigremove)
@@ -89,34 +89,62 @@ updates only).
 
 ---
 
-## Step 2 - New-RunnerRemovalToken
+## Step 2 - Invoke-GitHubRunnersApi
 
-**What:** `hyper-v/ubuntu/registration/down/github/New-RunnerRemovalToken.ps1`
+**What:** `hyper-v/ubuntu/registration/common/github/Invoke-GitHubRunnersApi.ps1`
 
-Mirrors `registration/up/github/New-RunnerRegistrationToken.ps1` in
-structure. Calls POST `/repos/{owner}/{repo}/actions/runners/remove-token`
-with the PAT and returns the short-lived token string. Owner and repo are
-parsed from `GithubUrl` the same way as its counterpart.
+Centralises the three patterns duplicated across all GitHub API callers:
+owner/repo parsing from `GithubUrl`, the standard `User-Agent` and
+`Authorization` headers, and the base URL
+`https://api.github.com/repos/{owner}/{repo}/actions/runners`.
 
-**Tests:** `Tests/registration/down/github/New-RunnerRemovalToken.Tests.ps1`
-- Calls the correct endpoint with the correct `Authorization` header.
-- Returns the token string from the response.
-- Propagates errors from `Invoke-RestMethod`.
+```powershell
+Invoke-GitHubRunnersApi -Pat $Pat -GithubUrl $GithubUrl `
+    [-Suffix 'remove-token'] [-Method Post]
+```
 
-**README:** Add the "Deregistration" section stub: script name, one-line
-description, and PAT scope requirement.
+Returns the raw `Invoke-RestMethod` response. Callers extract the fields
+they need (`.token`, `.runners`, etc.) or ignore the body (DELETE).
 
-**Why:** Removal token expires in 1 hour - must be fetched immediately
-before use, same constraint as the registration token.
+As part of this step:
+- `Get-GitHubRunnerRegistration` is refactored to call
+  `Invoke-GitHubRunnersApi` instead of `Invoke-RestMethod` directly.
+- `New-RunnerRegistrationToken` is deleted; its call is inlined into
+  `Invoke-RunnerRegistration`.
+- `New-RunnerRemovalToken` (created in the now-superseded Step 2) is
+  deleted; `Invoke-RunnerConfigRemove` (Step 5) will call
+  `Invoke-GitHubRunnersApi` directly.
+
+**Tests:** `Tests/registration/common/github/Invoke-GitHubRunnersApi.Tests.ps1`
+- Constructs the correct URI from `GithubUrl` and `Suffix`.
+- Passes the correct `Authorization` and `User-Agent` headers.
+- Passes the correct `Method` (defaults to `Get`).
+- Returns the raw response object.
+
+`Get-GitHubRunnerRegistration.Tests.ps1` is updated to mock
+`Invoke-GitHubRunnersApi` instead of `Invoke-RestMethod`.
+`Invoke-RunnerRegistration.Tests.ps1` is updated to mock
+`Invoke-GitHubRunnersApi` instead of `New-RunnerRegistrationToken`.
+`New-RunnerRegistrationToken.Tests.ps1` and
+`New-RunnerRemovalToken.Tests.ps1` are deleted.
+
+**README:** Add `Invoke-GitHubRunnersApi` to the `common/github/` entry in
+the repo structure section.
+
+**Why:** All four GitHub API functions share the same URL construction and
+headers. A single helper eliminates the duplication and is the single place
+to change the base URL, agent string, or auth scheme.
 
 ```mermaid
 sequenceDiagram
-    participant F as New-RunnerRemovalToken
+    participant C as Caller
+    participant A as Invoke-GitHubRunnersApi
     participant GH as GitHub API
 
-    F->>GH: POST /repos/{owner}/{repo}/actions/runners/remove-token (Bearer PAT)
-    GH-->>F: { token, expires_at }
-    F-->>caller: token string
+    C->>A: -Pat -GithubUrl [-Suffix] [-Method]
+    A->>GH: {Method} /repos/{owner}/{repo}/actions/runners/{Suffix}
+    GH-->>A: response
+    A-->>C: raw response
 ```
 
 ---
@@ -204,7 +232,7 @@ sequenceDiagram
 
 **What:** `hyper-v/ubuntu/registration/down/registration/Invoke-RunnerConfigRemove.ps1`
 
-Fetches a removal token via `New-RunnerRemovalToken` then runs
+Fetches a removal token via `Invoke-GitHubRunnersApi` then runs
 `sudo -u <runnerUser> ./config.sh remove --token <token> --unattended`
 from the runner directory. This deregisters the runner from GitHub and
 removes local credential files (`.runner`, `.credentials`).
@@ -231,7 +259,7 @@ sequenceDiagram
     participant GH as GitHub API
     participant VM as Ubuntu VM
 
-    F->>GH: New-RunnerRemovalToken (POST remove-token)
+    F->>GH: Invoke-GitHubRunnersApi (POST remove-token)
     GH-->>F: token
     F->>VM: sudo -u <runnerUser> ./config.sh remove --token --unattended
 ```
