@@ -1,0 +1,14 @@
+name: CI
+
+# Delegates to the shared PowerShell CI workflow in Infrastructure-Common.
+# Kept as a local file so the pull_request trigger works for PRs in this repo,
+# and so tag.yml can call it via workflow_call without an external reference.
+on:
+  pull_request:
+    branches: [ main, master ]
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  ci:
+    uses: VitaliiAndreev/Infrastructure-Common/.github/workflows/ci-powershell.yml@master
