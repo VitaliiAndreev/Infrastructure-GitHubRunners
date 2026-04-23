@@ -3,7 +3,7 @@ BeforeAll {
         param($SshClient, $Command, $ErrorAction)
     }
 
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\install\Invoke-TarballDownload.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\up\binary\Invoke-TarballDownload.ps1"
 
     $Script:FakeSsh  = [PSCustomObject] @{}
     $Script:CacheDir = '/home/u-actions-runner/cache'

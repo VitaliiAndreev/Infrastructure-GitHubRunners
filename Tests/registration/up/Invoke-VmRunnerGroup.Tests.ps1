@@ -1,17 +1,17 @@
 BeforeAll {
+    function Get-GitHubRunnerRegistration    { param($Pat, $GithubUrl, $RunnerName) }
     function Get-RunnerPaths                 { param($RunnerUser, $RunnerVersion, $RunnerName)
         [PSCustomObject] @{ CacheDir = '/cache'; TarPath = '/cache/runner.tar.gz'
                             RunnerDir = "/runners/$RunnerName" } }
-    function Invoke-RunnerInstall            { param($SshClient, $VmName, $RunnerEntries, $RunnerVersion) }
-    function Get-GitHubRunnerRegistration    { param($Pat, $GithubUrl, $RunnerName) }
     function Get-RunnerServiceName           { param($SshClient, $RunnerName) }
-    function Test-RunnerServiceActive        { param($SshClient, $VmName, $RunnerName) }
-    function Start-RunnerService             { param($SshClient, $VmName, $RunnerName) }
-    function New-RunnerRegistrationToken     { param($Pat, $GithubUrl) }
+    function Invoke-RunnerInstall            { param($SshClient, $VmName, $RunnerEntries, $RunnerVersion) }
     function Invoke-RunnerRegistration       { param($SshClient, $VmName, $RunnerUser, $Entry,
                                                      $Token, $RunnerDir, [switch] $SkipConfig) }
+    function New-RunnerRegistrationToken     { param($Pat, $GithubUrl) }
+    function Start-RunnerService             { param($SshClient, $VmName, $RunnerName) }
+    function Test-RunnerServiceActive        { param($SshClient, $VmName, $RunnerName) }
 
-    . "$PSScriptRoot\..\hyper-v\ubuntu\Invoke-VmRunnerGroup.ps1"
+    . "$PSScriptRoot\..\..\..\hyper-v\ubuntu\registration\up\Invoke-VmRunnerGroup.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}
 

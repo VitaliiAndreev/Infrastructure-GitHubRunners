@@ -143,30 +143,23 @@ Re-running `register-runners.ps1` is safe:
 
 ```
 hyper-v/ubuntu/
-  setup-secrets.ps1         Store runner config in the local vault
-  register-runners.ps1      Orchestrator - runs all steps below
-  resolve/                  Step 3: vault reads, pre-SSH validation, path conventions
-    ConvertFrom-GitHubRunnersConfigJson.ps1
-    Read-GitHubPat.ps1
-    Read-GitHubRunnersConfig.ps1
-    Read-VmDeployPasswords.ps1
-    Join-RunnerDeployCredentials.ps1
-    Test-RunnerVmConnectivity.ps1
-    Get-RunnerPaths.ps1
-  Invoke-VmRunnerGroup.ps1  Per-VM orchestration (install + reconcile all runners)
-  install/                  Step 4: runner binary installation via SSH
-    Resolve-RunnerVersion.ps1
-    Invoke-TarballDownload.ps1
-    Invoke-RunnerExtract.ps1
-    Invoke-RunnerInstall.ps1
-  register/                 Step 5: runner registration and service management
-    Get-GitHubRunnerRegistration.ps1
-    New-RunnerRegistrationToken.ps1
-    Get-RunnerServiceName.ps1
-    Test-RunnerServiceActive.ps1
-    Start-RunnerService.ps1
-    Invoke-RunnerRegistration.ps1
+  setup-secrets.ps1           Store runner config in the local vault
+  register-runners.ps1        Orchestrator for runner registration
+  registration/
+    common/                   Shared between registration and deregistration
+      config/                 Vault reads, JSON parsing, credential joining
+      github/                 GitHub REST API calls (read)
+      infra/                  Connectivity checks, path computation
+      service/                Systemd service state queries
+    up/                       Runner registration (install and register)
+      binary/                 Runner binary lifecycle (download, extract, install)
+      github/                 GitHub REST API calls (registration)
+      registration/           config.sh lifecycle (register)
+      service/                Systemd service management (start)
+      Invoke-VmRunnerGroup.ps1  Per-VM orchestration (install + reconcile)
 Tests/
-  *.Tests.ps1               Unit tests (one file per production file)
-  Integration/              Integration tests (require a live SSH target via Docker)
+  registration/               Unit tests mirroring the production structure
+    common/
+    up/
+  Integration/                Integration tests (require a live SSH target via Docker)
 ```

@@ -1,5 +1,5 @@
 BeforeAll {
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\install\Resolve-RunnerVersion.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\up\github\Resolve-RunnerVersion.ps1"
 }
 
 Describe 'Resolve-RunnerVersion' {

@@ -5,7 +5,7 @@ BeforeAll {
     function Invoke-TarballDownload { param($SshClient, $VmName, $RunnerUser, $RunnerVersion, $CacheDir, $TarPath) }
     function Invoke-RunnerExtract   { param($SshClient, $VmName, $RunnerUser, $RunnerVersion, $RunnerName, $RunnerDir, $TarPath) }
 
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\install\Invoke-RunnerInstall.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\up\binary\Invoke-RunnerInstall.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}
 

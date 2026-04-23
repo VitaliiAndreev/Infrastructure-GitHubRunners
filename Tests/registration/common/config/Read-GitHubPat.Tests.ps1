@@ -1,5 +1,5 @@
 BeforeAll {
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\resolve\Read-GitHubPat.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\config\Read-GitHubPat.ps1"
 }
 
 Describe 'Read-GitHubPat' {

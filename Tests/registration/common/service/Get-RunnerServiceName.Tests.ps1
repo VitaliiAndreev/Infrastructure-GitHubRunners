@@ -1,7 +1,7 @@
 BeforeAll {
     function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\register\Get-RunnerServiceName.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\service\Get-RunnerServiceName.ps1"
 
     $Script:FakeSsh = [PSCustomObject] @{}
 }

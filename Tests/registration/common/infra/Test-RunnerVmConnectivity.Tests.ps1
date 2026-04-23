@@ -1,5 +1,5 @@
 BeforeAll {
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\resolve\Test-RunnerVmConnectivity.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\infra\Test-RunnerVmConnectivity.ps1"
 
     function New-RunnerEntry {
         param(
