@@ -1,7 +1,7 @@
 BeforeAll {
     function Get-InfrastructureSecret { param($VaultName, $SecretName) }
 
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\resolve\Read-VmDeployPasswords.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\config\Read-VmDeployPasswords.ps1"
 }
 
 Describe 'Read-VmDeployPasswords' {

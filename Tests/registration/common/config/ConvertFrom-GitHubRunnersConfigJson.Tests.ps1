@@ -7,7 +7,7 @@ BeforeAll {
         param($Object, $Properties, $Context)
     }
 
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\resolve\ConvertFrom-GitHubRunnersConfigJson.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1"
 
     # Builds a minimal valid runner entry JSON string with all required fields.
     # Individual tests override specific fields as needed.

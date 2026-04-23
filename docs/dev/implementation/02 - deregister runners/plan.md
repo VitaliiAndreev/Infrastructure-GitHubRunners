@@ -45,32 +45,41 @@
 
 ## Step 1 - Restructure existing folders
 
-**What:** Rename and reorganise all existing helper folders to match the
-domain-based layout. No logic changes — file moves and dot-source path
-updates only.
+**What:** Reorganise all existing helper files from flat operation-based
+folders (`resolve/`, `install/`, `register/`) into a three-layer structure
+under `registration/`:
+
+- `registration/common/` - shared between registration and deregistration
+- `registration/up/` - registration-specific helpers
+- `registration/down/` - deregistration-specific helpers (populated in
+  steps 2-7)
+
+Final locations after the move:
 
 | From | To |
 |---|---|
-| `resolve/ConvertFrom-GitHubRunnersConfigJson.ps1` | `config/ConvertFrom-GitHubRunnersConfigJson.ps1` |
-| `resolve/Read-GitHubPat.ps1` | `config/Read-GitHubPat.ps1` |
-| `resolve/Read-GitHubRunnersConfig.ps1` | `config/Read-GitHubRunnersConfig.ps1` |
-| `resolve/Read-VmDeployPasswords.ps1` | `config/Read-VmDeployPasswords.ps1` |
-| `resolve/Join-RunnerDeployCredentials.ps1` | `config/Join-RunnerDeployCredentials.ps1` |
-| `resolve/Test-RunnerVmConnectivity.ps1` | `infra/Test-RunnerVmConnectivity.ps1` |
-| `resolve/Get-RunnerPaths.ps1` | `infra/Get-RunnerPaths.ps1` |
-| `install/Resolve-RunnerVersion.ps1` | `github/Resolve-RunnerVersion.ps1` |
-| `install/Invoke-TarballDownload.ps1` | `binary/Invoke-TarballDownload.ps1` |
-| `install/Invoke-RunnerExtract.ps1` | `binary/Invoke-RunnerExtract.ps1` |
-| `install/Invoke-RunnerInstall.ps1` | `binary/Invoke-RunnerInstall.ps1` |
-| `register/Get-GitHubRunnerRegistration.ps1` | `github/Get-GitHubRunnerRegistration.ps1` |
-| `register/New-RunnerRegistrationToken.ps1` | `github/New-RunnerRegistrationToken.ps1` |
-| `register/Get-RunnerServiceName.ps1` | `service/Get-RunnerServiceName.ps1` |
-| `register/Test-RunnerServiceActive.ps1` | `service/Test-RunnerServiceActive.ps1` |
-| `register/Start-RunnerService.ps1` | `service/Start-RunnerService.ps1` |
-| `register/Invoke-RunnerRegistration.ps1` | `registration/Invoke-RunnerRegistration.ps1` |
+| `resolve/ConvertFrom-GitHubRunnersConfigJson.ps1` | `registration/common/config/` |
+| `resolve/Join-RunnerDeployCredentials.ps1` | `registration/common/config/` |
+| `resolve/Read-GitHubPat.ps1` | `registration/common/config/` |
+| `resolve/Read-GitHubRunnersConfig.ps1` | `registration/common/config/` |
+| `resolve/Read-VmDeployPasswords.ps1` | `registration/common/config/` |
+| `resolve/Get-RunnerPaths.ps1` | `registration/common/infra/` |
+| `resolve/Test-RunnerVmConnectivity.ps1` | `registration/common/infra/` |
+| `register/Get-GitHubRunnerRegistration.ps1` | `registration/common/github/` |
+| `register/Get-RunnerServiceName.ps1` | `registration/common/service/` |
+| `register/Test-RunnerServiceActive.ps1` | `registration/common/service/` |
+| `install/Invoke-RunnerExtract.ps1` | `registration/up/binary/` |
+| `install/Invoke-RunnerInstall.ps1` | `registration/up/binary/` |
+| `install/Invoke-TarballDownload.ps1` | `registration/up/binary/` |
+| `install/Resolve-RunnerVersion.ps1` | `registration/up/github/` |
+| `register/New-RunnerRegistrationToken.ps1` | `registration/up/github/` |
+| `register/Invoke-RunnerRegistration.ps1` | `registration/up/registration/` |
+| `register/Start-RunnerService.ps1` | `registration/up/service/` |
+| `Invoke-VmRunnerGroup.ps1` | `registration/up/` |
 
-Test files move in parallel under `Tests/`.
-Dot-source paths in `register-runners.ps1` are updated to match.
+Test files move in parallel under `Tests/registration/`.
+Dot-source paths in `register-runners.ps1` and `setup-secrets.ps1` are
+updated to match.
 The now-empty `resolve/`, `install/`, and `register/` folders are deleted.
 
 **Tests:** All existing tests pass unchanged after the move (import path
@@ -82,14 +91,14 @@ updates only).
 
 ## Step 2 - New-RunnerRemovalToken
 
-**What:** `hyper-v/ubuntu/github/New-RunnerRemovalToken.ps1`
+**What:** `hyper-v/ubuntu/registration/down/github/New-RunnerRemovalToken.ps1`
 
-Mirrors `github/New-RunnerRegistrationToken.ps1` in structure. Calls POST
-`/repos/{owner}/{repo}/actions/runners/remove-token` with the PAT and
-returns the short-lived token string. Owner and repo are parsed from
-`GithubUrl` the same way as its counterpart.
+Mirrors `registration/up/github/New-RunnerRegistrationToken.ps1` in
+structure. Calls POST `/repos/{owner}/{repo}/actions/runners/remove-token`
+with the PAT and returns the short-lived token string. Owner and repo are
+parsed from `GithubUrl` the same way as its counterpart.
 
-**Tests:** `Tests/github/New-RunnerRemovalToken.Tests.ps1`
+**Tests:** `Tests/registration/down/github/New-RunnerRemovalToken.Tests.ps1`
 - Calls the correct endpoint with the correct `Authorization` header.
 - Returns the token string from the response.
 - Propagates errors from `Invoke-RestMethod`.
@@ -114,13 +123,13 @@ sequenceDiagram
 
 ## Step 3 - Remove-GitHubRunner
 
-**What:** `hyper-v/ubuntu/github/Remove-GitHubRunner.ps1`
+**What:** `hyper-v/ubuntu/registration/down/github/Remove-GitHubRunner.ps1`
 
 Calls DELETE `/repos/{owner}/{repo}/actions/runners/{id}` using the runner
 ID from `Get-GitHubRunnerRegistration`. 404 is treated as success
 (idempotency). Owner and repo are parsed from `GithubUrl`.
 
-**Tests:** `Tests/github/Remove-GitHubRunner.Tests.ps1`
+**Tests:** `Tests/registration/down/github/Remove-GitHubRunner.Tests.ps1`
 - Calls the DELETE endpoint with the correct runner ID and auth header.
 - Does not throw on 404 (already removed).
 - Propagates non-404 errors.
@@ -149,7 +158,7 @@ sequenceDiagram
 
 ## Step 4 - Remove-RunnerService
 
-**What:** `hyper-v/ubuntu/service/Remove-RunnerService.ps1`
+**What:** `hyper-v/ubuntu/registration/down/service/Remove-RunnerService.ps1`
 
 Stops the systemd service and uninstalls the systemd unit over an existing
 SSH connection. Each operation is independently guarded:
@@ -161,7 +170,7 @@ SSH connection. Each operation is independently guarded:
 Neither a stopped service nor an absent unit is an error - both are
 expected in partial-cleanup re-runs.
 
-**Tests:** `Tests/service/Remove-RunnerService.Tests.ps1`
+**Tests:** `Tests/registration/down/service/Remove-RunnerService.Tests.ps1`
 - Stops the service when active; skips when already inactive.
 - Uninstalls the unit when it exists; skips when absent.
 - Runs `svc.sh uninstall` from the runner directory (working directory
@@ -193,7 +202,7 @@ sequenceDiagram
 
 ## Step 5 - Invoke-RunnerConfigRemove
 
-**What:** `hyper-v/ubuntu/registration/Invoke-RunnerConfigRemove.ps1`
+**What:** `hyper-v/ubuntu/registration/down/registration/Invoke-RunnerConfigRemove.ps1`
 
 Fetches a removal token via `New-RunnerRemovalToken` then runs
 `sudo -u <runnerUser> ./config.sh remove --token <token> --unattended`
@@ -205,15 +214,16 @@ Only called when the runner is confirmed present on GitHub. The caller
 `Get-GitHubRunnerRegistration`. The token must not appear in any log
 output or error message.
 
-**Tests:** `Tests/registration/Invoke-RunnerConfigRemove.Tests.ps1`
+**Tests:** `Tests/registration/down/registration/Invoke-RunnerConfigRemove.Tests.ps1`
 - Fetches a removal token before calling config.sh.
 - Calls config.sh with the correct token, runner user, and `--unattended`.
 - Throws when config.sh exits non-zero.
 
 **README:** No change needed - prior steps cover the cleanup description.
 
-**Why:** Belongs in `registration/` alongside `Invoke-RunnerRegistration`
-- both execute config.sh to manage the runner's identity with GitHub.
+**Why:** Belongs in `registration/down/registration/` alongside
+`registration/up/registration/Invoke-RunnerRegistration` - both execute
+config.sh to manage the runner's identity with GitHub.
 
 ```mermaid
 sequenceDiagram
@@ -230,7 +240,7 @@ sequenceDiagram
 
 ## Step 6 - Remove-RunnerFiles
 
-**What:** `hyper-v/ubuntu/binary/Remove-RunnerFiles.ps1`
+**What:** `hyper-v/ubuntu/registration/down/binary/Remove-RunnerFiles.ps1`
 
 Deletes the runner directory (`sudo rm -rf <runnerDir>`) if it exists.
 Returns without error if the directory is already absent. Always called on
@@ -238,7 +248,7 @@ reachable VMs regardless of GitHub registration state - this is the
 leftover cleanup guarantee that ensures the next registration starts from
 a clean slate.
 
-**Tests:** `Tests/binary/Remove-RunnerFiles.Tests.ps1`
+**Tests:** `Tests/registration/down/binary/Remove-RunnerFiles.Tests.ps1`
 - Removes the directory when it exists.
 - Does not throw when the directory is already absent.
 
@@ -263,7 +273,7 @@ sequenceDiagram
 
 ## Step 7 - Invoke-VmDeregisterGroup
 
-**What:** `hyper-v/ubuntu/Invoke-VmDeregisterGroup.ps1`
+**What:** `hyper-v/ubuntu/registration/down/Invoke-VmDeregisterGroup.ps1`
 
 Per-VM orchestration for **reachable VMs only**. Receives a live
 `SshClient` (never null - the orchestrator owns the reachable/unreachable
@@ -279,7 +289,7 @@ Sequence per runner entry:
 The GitHub check (step 2) drives step 3 explicitly - no inferring
 registration state from the filesystem.
 
-**Tests:** `Tests/Invoke-VmDeregisterGroup.Tests.ps1`
+**Tests:** `Tests/registration/down/Invoke-VmDeregisterGroup.Tests.ps1`
 - Always calls `Remove-RunnerService`.
 - Calls `Invoke-RunnerConfigRemove` when runner is registered on GitHub.
 - Does not call `Invoke-RunnerConfigRemove` when runner is absent on GitHub.

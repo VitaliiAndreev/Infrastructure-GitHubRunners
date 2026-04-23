@@ -1,5 +1,5 @@
 BeforeAll {
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\resolve\Get-RunnerPaths.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\infra\Get-RunnerPaths.ps1"
 }
 
 Describe 'Get-RunnerPaths' {

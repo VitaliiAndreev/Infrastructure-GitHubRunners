@@ -1,5 +1,5 @@
 BeforeAll {
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\register\New-RunnerRegistrationToken.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\up\github\New-RunnerRegistrationToken.ps1"
 }
 
 Describe 'New-RunnerRegistrationToken' {

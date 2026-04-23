@@ -134,10 +134,10 @@ Import-Module Posh-SSH
 
 Write-Step 5 'dot-sourcing install functions'
 $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu')
-. ([IO.Path]::Combine($src, 'resolve',  'Get-RunnerPaths.ps1'))
-. ([IO.Path]::Combine($src, 'install',  'Invoke-TarballDownload.ps1'))
-. ([IO.Path]::Combine($src, 'install',  'Invoke-RunnerExtract.ps1'))
-. ([IO.Path]::Combine($src, 'install',  'Invoke-RunnerInstall.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'common', 'infra',       'Get-RunnerPaths.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'up',     'binary', 'Invoke-TarballDownload.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'up',     'binary', 'Invoke-RunnerExtract.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'up',     'binary', 'Invoke-RunnerInstall.ps1'))
 
 # -----------------------------------------------------------------------
 # 6. Open SSH session

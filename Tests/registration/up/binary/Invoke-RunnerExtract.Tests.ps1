@@ -3,7 +3,7 @@ BeforeAll {
         param($SshClient, $Command, $ErrorAction)
     }
 
-    . "$PSScriptRoot\..\..\hyper-v\ubuntu\install\Invoke-RunnerExtract.ps1"
+    . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\up\binary\Invoke-RunnerExtract.ps1"
 
     $Script:FakeSsh   = [PSCustomObject] @{}
     $Script:RunnerDir = '/home/u-actions-runner/runners/runner-a'
