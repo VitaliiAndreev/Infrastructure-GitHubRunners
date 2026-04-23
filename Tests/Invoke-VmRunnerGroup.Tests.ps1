@@ -4,10 +4,12 @@ BeforeAll {
                             RunnerDir = "/runners/$RunnerName" } }
     function Invoke-RunnerInstall            { param($SshClient, $VmName, $RunnerEntries, $RunnerVersion) }
     function Get-GitHubRunnerRegistration    { param($Pat, $GithubUrl, $RunnerName) }
+    function Get-RunnerServiceName           { param($SshClient, $RunnerName) }
     function Test-RunnerServiceActive        { param($SshClient, $VmName, $RunnerName) }
     function Start-RunnerService             { param($SshClient, $VmName, $RunnerName) }
     function New-RunnerRegistrationToken     { param($Pat, $GithubUrl) }
-    function Invoke-RunnerRegistration       { param($SshClient, $VmName, $RunnerUser, $Entry, $Token, $RunnerDir) }
+    function Invoke-RunnerRegistration       { param($SshClient, $VmName, $RunnerUser, $Entry,
+                                                     $Token, $RunnerDir, [switch] $SkipConfig) }
 
     . "$PSScriptRoot\..\hyper-v\ubuntu\Invoke-VmRunnerGroup.ps1"
 
@@ -50,10 +52,11 @@ Describe 'Invoke-VmRunnerGroup' {
     }
 
     Context 'registered but service down' {
-        It 'restarts the service without re-registering' {
+        It 'restarts the service without re-registering when the unit file exists' {
             Mock Invoke-RunnerInstall         {}
             Mock Get-GitHubRunnerRegistration { [PSCustomObject] @{ id = 1 } }
             Mock Test-RunnerServiceActive     { $false }
+            Mock Get-RunnerServiceName        { 'actions.runner.user-repo.runner-a.service' }
             Mock Start-RunnerService          {}
             Mock Invoke-RunnerRegistration    {}
 
@@ -66,6 +69,25 @@ Describe 'Invoke-VmRunnerGroup' {
 
             Should -Invoke Start-RunnerService       -Times 1
             Should -Invoke Invoke-RunnerRegistration -Times 0
+        }
+
+        It 'installs the service without re-registering when the unit file is missing' {
+            Mock Invoke-RunnerInstall         {}
+            Mock Get-GitHubRunnerRegistration { [PSCustomObject] @{ id = 1 } }
+            Mock Test-RunnerServiceActive     { $false }
+            Mock Get-RunnerServiceName        { $null }
+            Mock Start-RunnerService          {}
+            Mock Invoke-RunnerRegistration    {}
+
+            Invoke-VmRunnerGroup `
+                -SshClient     $Script:FakeSsh `
+                -VmName        'vm-01' `
+                -Targets       @(New-Target 'runner-a') `
+                -RunnerVersion '2.317.0' `
+                -Pat           'pat'
+
+            Should -Invoke Invoke-RunnerRegistration -Times 1 -ParameterFilter { $SkipConfig }
+            Should -Invoke Start-RunnerService       -Times 0
         }
     }
 
@@ -85,7 +107,7 @@ Describe 'Invoke-VmRunnerGroup' {
                 -Pat           'pat'
 
             Should -Invoke Invoke-RunnerRegistration -Times 1 -ParameterFilter {
-                $RunnerUser -eq 'u-actions-runner' -and $Token -eq 'reg_token'
+                $RunnerUser -eq 'u-actions-runner' -and $Token -eq 'reg_token' -and -not $SkipConfig
             }
         }
     }

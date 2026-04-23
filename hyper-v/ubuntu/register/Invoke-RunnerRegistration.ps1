@@ -12,9 +12,14 @@
 #
 #   Steps performed over the existing SSH connection:
 #     1. config.sh --unattended  - registers the runner with GitHub.
+#        Skipped when -SkipConfig is set (runner already registered).
 #     2. svc.sh install          - installs the systemd service.
 #     3. svc.sh start            - starts the service.
 #     4. Test-RunnerServiceActive - verifies the service is active.
+#
+#   -SkipConfig is used when the runner is already registered with GitHub
+#   but the systemd unit was never installed - e.g. a previous run failed
+#   between config.sh and svc.sh. Token is not required in this case.
 #
 #   All steps run from the runner directory. config.sh runs as RunnerUser
 #   (via sudoers-permitted 'sudo -u') so the runner files remain owned by
@@ -40,39 +45,50 @@ function Invoke-RunnerRegistration {
         [object] $Entry,
 
         # Short-lived registration token from New-RunnerRegistrationToken.
-        # Must not appear in any log output.
-        [Parameter(Mandatory)]
-        [string] $Token,
+        # Must not appear in any log output. Not required when -SkipConfig
+        # is set.
+        [Parameter()]
+        [string] $Token = '',
 
         # Pre-computed by Get-RunnerPaths - caller owns path convention.
         [Parameter(Mandatory)]
-        [string] $RunnerDir
+        [string] $RunnerDir,
+
+        # When set, skips config.sh. Used when the runner is already
+        # registered with GitHub but the systemd unit is missing.
+        [switch] $SkipConfig
     )
+
+    if (-not $SkipConfig -and -not $Token) {
+        throw "[$VmName] Token is required when -SkipConfig is not set."
+    }
 
     $runnerName = $Entry.runnerName
     $labelsArg  = @($Entry.runnerLabels) -join ','
 
-    # config.sh registers the runner with GitHub. Token is intentionally
-    # not included in any throw message or Write-* call below.
-    $r = Invoke-SshClientCommand `
-        -SshClient $SshClient `
-        -Command   ("sudo -u $RunnerUser '$runnerDir/config.sh'" +
-                    " --url '$($Entry.githubUrl)'" +
-                    " --token '$Token'" +
-                    " --name '$runnerName'" +
-                    " --labels '$labelsArg'" +
-                    " --unattended") `
-        -ErrorAction Stop
+    if (-not $SkipConfig) {
+        # config.sh registers the runner with GitHub. Token is intentionally
+        # not included in any throw message or Write-* call below.
+        $r = Invoke-SshClientCommand `
+            -SshClient $SshClient `
+            -Command   ("sudo -u $RunnerUser '$runnerDir/config.sh'" +
+                        " --url '$($Entry.githubUrl)'" +
+                        " --token '$Token'" +
+                        " --name '$runnerName'" +
+                        " --labels '$labelsArg'" +
+                        " --unattended") `
+            -ErrorAction Stop
 
-    if ($r.ExitStatus -ne 0) {
-        throw "[$VmName] config.sh failed for '$runnerName': $($r.Error)"
+        if ($r.ExitStatus -ne 0) {
+            throw "[$VmName] config.sh failed for '$runnerName': $($r.Error)"
+        }
     }
 
-    # svc.sh uses its own path via BASH_SOURCE so it does not need to be
-    # invoked from within the runner directory.
+    # svc.sh resolves the runner root via $(pwd), so the working directory
+    # must be the runner directory when it runs. 'cd' before sudo sets it.
     $r = Invoke-SshClientCommand `
         -SshClient $SshClient `
-        -Command   "sudo '$runnerDir/svc.sh' install '$RunnerUser'" `
+        -Command   "cd '$runnerDir' && sudo './svc.sh' install '$RunnerUser'" `
         -ErrorAction Stop
 
     if ($r.ExitStatus -ne 0) {
@@ -81,7 +97,7 @@ function Invoke-RunnerRegistration {
 
     $r = Invoke-SshClientCommand `
         -SshClient $SshClient `
-        -Command   "sudo '$runnerDir/svc.sh' start" `
+        -Command   "cd '$runnerDir' && sudo './svc.sh' start" `
         -ErrorAction Stop
 
     if ($r.ExitStatus -ne 0) {

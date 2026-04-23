@@ -77,10 +77,32 @@ function Invoke-VmRunnerGroup {
                     -ForegroundColor Green
             }
             elseif ($registration -and -not $serviceActive) {
-                Start-RunnerService `
+                # Distinguish "unit installed but stopped" from "unit never
+                # installed". The latter happens when a previous run succeeded
+                # at config.sh but failed before svc.sh install.
+                $serviceName = Get-RunnerServiceName `
                     -SshClient  $SshClient `
-                    -VmName     $VmName `
                     -RunnerName $entry.runnerName
+
+                if ($serviceName) {
+                    Start-RunnerService `
+                        -SshClient  $SshClient `
+                        -VmName     $VmName `
+                        -RunnerName $entry.runnerName
+                }
+                else {
+                    Write-Host ("[$VmName] Runner '$($entry.runnerName)': registered " +
+                        "but service unit missing - installing service only.") `
+                        -ForegroundColor Yellow
+
+                    Invoke-RunnerRegistration `
+                        -SshClient  $SshClient `
+                        -VmName     $VmName `
+                        -RunnerUser $runnerUser `
+                        -Entry      $entry `
+                        -RunnerDir  $entryPaths.RunnerDir `
+                        -SkipConfig
+                }
             }
             else {
                 # Token expires in 1hr - fetch immediately before use.

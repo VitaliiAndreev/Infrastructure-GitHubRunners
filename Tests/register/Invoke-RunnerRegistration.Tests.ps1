@@ -57,6 +57,55 @@ Describe 'Invoke-RunnerRegistration' {
                 -RunnerDir  $Script:RunnerDir
             } | Should -Throw '*config.sh failed*'
         }
+
+        It 'throws when Token is empty and -SkipConfig is not set' {
+            { Invoke-RunnerRegistration `
+                -SshClient  $Script:FakeSsh `
+                -VmName     'vm-01' `
+                -RunnerUser 'u-actions-runner' `
+                -Entry      (New-Entry 'runner-a') `
+                -RunnerDir  $Script:RunnerDir
+            } | Should -Throw '*Token is required*'
+        }
+    }
+
+    Context '-SkipConfig' {
+        It 'does not call config.sh when -SkipConfig is set' {
+            Mock Invoke-SshClientCommand { [PSCustomObject] @{ ExitStatus = 0; Error = '' } }
+            Mock Test-RunnerServiceActive { $true }
+
+            Invoke-RunnerRegistration `
+                -SshClient  $Script:FakeSsh `
+                -VmName     'vm-01' `
+                -RunnerUser 'u-actions-runner' `
+                -Entry      (New-Entry 'runner-a') `
+                -RunnerDir  $Script:RunnerDir `
+                -SkipConfig
+
+            Should -Invoke Invoke-SshClientCommand -Times 0 -ParameterFilter {
+                $Command -like '*config.sh*'
+            }
+        }
+
+        It 'still installs and starts the service when -SkipConfig is set' {
+            Mock Invoke-SshClientCommand { [PSCustomObject] @{ ExitStatus = 0; Error = '' } }
+            Mock Test-RunnerServiceActive { $true }
+
+            Invoke-RunnerRegistration `
+                -SshClient  $Script:FakeSsh `
+                -VmName     'vm-01' `
+                -RunnerUser 'u-actions-runner' `
+                -Entry      (New-Entry 'runner-a') `
+                -RunnerDir  $Script:RunnerDir `
+                -SkipConfig
+
+            Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
+                $Command -like "*svc.sh' install 'u-actions-runner'*"
+            }
+            Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
+                $Command -like "*svc.sh' start*"
+            }
+        }
     }
 
     Context 'svc.sh' {
