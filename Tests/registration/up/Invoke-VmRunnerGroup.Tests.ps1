@@ -4,10 +4,10 @@ BeforeAll {
         [PSCustomObject] @{ CacheDir = '/cache'; TarPath = '/cache/runner.tar.gz'
                             RunnerDir = "/runners/$RunnerName" } }
     function Get-RunnerServiceName           { param($SshClient, $RunnerName) }
+    function Invoke-GitHubRunnersApi         { param($Pat, $GithubUrl, $Suffix, $Method) }
     function Invoke-RunnerInstall            { param($SshClient, $VmName, $RunnerEntries, $RunnerVersion) }
     function Invoke-RunnerRegistration       { param($SshClient, $VmName, $RunnerUser, $Entry,
                                                      $Token, $RunnerDir, [switch] $SkipConfig) }
-    function New-RunnerRegistrationToken     { param($Pat, $GithubUrl) }
     function Start-RunnerService             { param($SshClient, $VmName, $RunnerName) }
     function Test-RunnerServiceActive        { param($SshClient, $VmName, $RunnerName) }
 
@@ -96,7 +96,7 @@ Describe 'Invoke-VmRunnerGroup' {
             Mock Invoke-RunnerInstall         {}
             Mock Get-GitHubRunnerRegistration { $null }
             Mock Test-RunnerServiceActive     { $false }
-            Mock New-RunnerRegistrationToken  { 'reg_token' }
+            Mock Invoke-GitHubRunnersApi      { [PSCustomObject] @{ token = 'reg_token' } }
             Mock Invoke-RunnerRegistration    {}
 
             Invoke-VmRunnerGroup `

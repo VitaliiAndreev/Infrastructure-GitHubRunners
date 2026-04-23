@@ -1,7 +1,8 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    register-runners.ps1 after Infrastructure.Common is loaded.
+    register-runners.ps1 and deregister-runners.ps1 after Infrastructure.Common
+    is loaded.
 #>
 
 # ---------------------------------------------------------------------------
@@ -33,17 +34,10 @@ function Get-GitHubRunnerRegistration {
         [string] $RunnerName
     )
 
-    $parts = $GithubUrl.TrimEnd('/') -split '/'
-    $owner = $parts[-2]
-    $repo  = $parts[-1]
-
-    $response = Invoke-RestMethod `
-        -Uri     "https://api.github.com/repos/$owner/$repo/actions/runners?per_page=100" `
-        -Headers @{
-            'User-Agent'    = 'Infrastructure-GitHubRunners'
-            'Authorization' = "Bearer $Pat"
-        } `
-        -ErrorAction Stop
+    $response = Invoke-GitHubRunnersApi `
+        -Pat       $Pat `
+        -GithubUrl $GithubUrl `
+        -Suffix    '?per_page=100'
 
     # Select-Object -ErrorAction SilentlyContinue guards against an absent
     # 'runners' property under Set-StrictMode -Version Latest, which would

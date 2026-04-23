@@ -106,9 +106,11 @@ function Invoke-VmRunnerGroup {
             }
             else {
                 # Token expires in 1hr - fetch immediately before use.
-                $token = New-RunnerRegistrationToken `
+                $token = (Invoke-GitHubRunnersApi `
                     -Pat       $Pat `
-                    -GithubUrl $entry.githubUrl
+                    -GithubUrl $entry.githubUrl `
+                    -Suffix    'registration-token' `
+                    -Method    'Post').token
 
                 Invoke-RunnerRegistration `
                     -SshClient  $SshClient `
