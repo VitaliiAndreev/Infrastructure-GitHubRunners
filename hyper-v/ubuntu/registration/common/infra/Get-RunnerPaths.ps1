@@ -21,8 +21,9 @@ function Get-RunnerPaths {
         [string] $RunnerUser,
 
         # Version string without leading 'v', e.g. '2.317.0'.
-        [Parameter(Mandatory)]
-        [string] $RunnerVersion,
+        # Optional - omit when only RunnerDir is needed (e.g. deregistration).
+        # TarName and TarPath are $null when version is not provided.
+        [string] $RunnerVersion = '',
 
         # Optional. Populate RunnerDir only when a specific runner is known.
         [string] $RunnerName = ''
@@ -30,12 +31,12 @@ function Get-RunnerPaths {
 
     $homeDir  = "/home/$RunnerUser"
     $cacheDir = "$homeDir/cache"
-    $tarName  = "actions-runner-linux-x64-${RunnerVersion}.tar.gz"
+    $tarName  = if ($RunnerVersion) { "actions-runner-linux-x64-${RunnerVersion}.tar.gz" } else { $null }
 
     [PSCustomObject] @{
         CacheDir  = $cacheDir
         TarName   = $tarName
-        TarPath   = "$cacheDir/$tarName"
+        TarPath   = if ($tarName) { "$cacheDir/$tarName" } else { $null }
         RunnerDir = if ($RunnerName) { "$homeDir/runners/$RunnerName" } else { $null }
     }
 }

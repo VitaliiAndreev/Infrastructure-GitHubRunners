@@ -29,5 +29,12 @@ Describe 'Get-RunnerPaths' {
             $paths = Get-RunnerPaths -RunnerUser 'u-runner' -RunnerVersion '2.317.0'
             $paths.RunnerDir | Should -BeNullOrEmpty
         }
+
+        It 'returns RunnerDir without RunnerVersion (deregistration path)' {
+            $paths = Get-RunnerPaths -RunnerUser 'u-runner' -RunnerName 'runner-a'
+            $paths.RunnerDir | Should -Be '/home/u-runner/runners/runner-a'
+            $paths.TarName   | Should -BeNullOrEmpty
+            $paths.TarPath   | Should -BeNullOrEmpty
+        }
     }
 }
