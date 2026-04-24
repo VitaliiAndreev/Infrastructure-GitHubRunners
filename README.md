@@ -1,6 +1,7 @@
 # Infrastructure-GitHubRunners
 
-Registers self-hosted GitHub Actions runners on Ubuntu VMs provisioned by
+Registers and deregisters self-hosted GitHub Actions runners on Ubuntu VMs
+provisioned by
 [Infrastructure-Vm-Provisioner](https://github.com/VitalyAndreev/Infrastructure-Vm-Provisioner).
 
 ## Index
@@ -11,6 +12,7 @@ Registers self-hosted GitHub Actions runners on Ubuntu VMs provisioned by
 - [PAT requirements](#pat-requirements)
 - [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
 - [Idempotency](#idempotency)
+- [Deregistration](#deregistration)
 - [Repo structure](#repo-structure)
 
 ---
@@ -41,10 +43,13 @@ Registers self-hosted GitHub Actions runners on Ubuntu VMs provisioned by
 
 # 2. Register runners on all reachable VMs.
 .\hyper-v\ubuntu\register-runners.ps1
+
+# 3. Deregister runners from all reachable VMs.
+.\hyper-v\ubuntu\deregister-runners.ps1
 ```
 
-`register-runners.ps1` prompts for a GitHub PAT at startup. The PAT is held
-in memory only and is never written to disk or logged.
+Both scripts prompt for a GitHub PAT at startup. The PAT is held in memory
+only and is never written to disk or logged.
 
 ---
 
@@ -86,7 +91,8 @@ The PAT is prompted at runtime and never stored. Required scopes:
 The PAT is used to:
 - resolve the latest runner version via the GitHub Releases API,
 - check existing runner registration via the GitHub Runners API,
-- fetch short-lived registration tokens.
+- fetch short-lived registration and removal tokens,
+- delete runners directly via the GitHub API (deregistration force mode).
 
 ---
 
@@ -139,27 +145,72 @@ Re-running `register-runners.ps1` is safe:
 
 ---
 
+## Deregistration
+
+`deregister-runners.ps1` reads the same vault config as registration and
+cleanly removes each runner from both GitHub and the VM.
+
+```powershell
+# Normal mode - VM must be reachable.
+.\hyper-v\ubuntu\deregister-runners.ps1
+
+# Force mode - removes GitHub registrations even when the VM is unreachable.
+.\hyper-v\ubuntu\deregister-runners.ps1 -Force
+```
+
+Required PAT scopes are the same as for registration (`repo` for private
+repos, `public_repo` for public).
+
+### Unreachable VM behaviour
+
+| Mode | VM unreachable | Runner on GitHub | Outcome |
+|---|---|---|---|
+| Normal | Yes | Yes | Reported as error at end of run |
+| Normal | Yes | No | Logged and skipped |
+| Force | Yes | Yes | Deleted via GitHub API; no VM-side cleanup |
+| Force | Yes | No | Logged and skipped |
+
+### Per-runner cleanup sequence (reachable VMs)
+
+1. Stop and uninstall the systemd service if present.
+2. Deregister from GitHub via `config.sh remove` if the runner is registered.
+3. Delete the runner directory to ensure the next registration starts clean.
+
+Re-running `deregister-runners.ps1` is safe: resources already removed on
+GitHub (404) are treated as success, stopped services and absent unit files
+are silently skipped, and absent runner directories are ignored.
+
+---
+
 ## Repo structure
 
 ```
 hyper-v/ubuntu/
   setup-secrets.ps1           Store runner config in the local vault
   register-runners.ps1        Orchestrator for runner registration
+  deregister-runners.ps1      Orchestrator for runner deregistration
   registration/
     common/                   Shared between registration and deregistration
       config/                 Vault reads, JSON parsing, credential joining
-      github/                 GitHub REST API calls (read)
+      github/                 GitHub REST API calls (shared wrapper + read)
       infra/                  Connectivity checks, path computation
       service/                Systemd service state queries
     up/                       Runner registration (install and register)
       binary/                 Runner binary lifecycle (download, extract, install)
-      github/                 GitHub REST API calls (registration)
+      github/                 GitHub Releases API (runner version resolution)
       registration/           config.sh lifecycle (register)
       service/                Systemd service management (start)
       Invoke-VmRunnerGroup.ps1  Per-VM orchestration (install + reconcile)
+    down/                     Runner deregistration (stop, deregister, remove)
+      binary/                 Runner directory removal
+      github/                 GitHub REST API calls (runner deletion)
+      registration/           config.sh lifecycle (deregister)
+      service/                Systemd service management (stop, uninstall)
+      Invoke-VmDeregisterGroup.ps1  Per-VM orchestration (stop, deregister, remove)
 Tests/
   registration/               Unit tests mirroring the production structure
     common/
     up/
+    down/
   Integration/                Integration tests (require a live SSH target via Docker)
 ```

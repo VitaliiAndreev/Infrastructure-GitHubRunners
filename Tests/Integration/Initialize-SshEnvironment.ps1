@@ -92,7 +92,7 @@ Write-Step 3 'configuring sudoers'
 $sudoersPath = "/etc/sudoers.d/${Script:DeployUser}"
 Set-Content -Path $sudoersPath -Value @"
 ${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: ALL
-${Script:DeployUser} ALL=(root) NOPASSWD: /bin/systemctl
+${Script:DeployUser} ALL=(root) NOPASSWD: /bin/systemctl, /bin/rm
 Defaults:${Script:DeployUser} !requiretty
 "@
 & chmod 0440 $sudoersPath
