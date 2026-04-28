@@ -34,9 +34,9 @@ function Invoke-VmDeregisterGroup {
         [Parameter(Mandatory)]
         [object[]] $Targets,
 
-        # GitHub PAT - used for API calls only, never logged.
+        # GitHub token - used for API calls only, never logged.
         [Parameter(Mandatory)]
-        [string] $Pat
+        [string] $Token
     )
 
     foreach ($target in $Targets) {
@@ -58,7 +58,7 @@ function Invoke-VmDeregisterGroup {
 
         # Step 2: check GitHub registration state.
         $registration = Get-GitHubRunnerRegistration `
-            -Pat        $Pat `
+            -Token      $Token `
             -GithubUrl  $entry.githubUrl `
             -RunnerName $entry.runnerName
 
@@ -70,7 +70,7 @@ function Invoke-VmDeregisterGroup {
                 -RunnerUser $entry.runnerUsername `
                 -Entry      $entry `
                 -RunnerDir  $entryPaths.RunnerDir `
-                -Pat        $Pat
+                -Token      $Token
         }
 
         # Step 4: remove runner directory. Always run to clean up any leftover

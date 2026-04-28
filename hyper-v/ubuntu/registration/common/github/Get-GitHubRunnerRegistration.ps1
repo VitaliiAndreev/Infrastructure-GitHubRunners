@@ -17,15 +17,15 @@
 #   per_page=100 avoids the 30-item default page limit. Pagination beyond
 #   100 runners per repo is not handled - it is unlikely in practice.
 #
-#   The PAT is passed in the Authorization header, not the URL, so it does
-#   not appear in server logs or error messages.
+#   The token is passed in the Authorization header, not the URL, so it
+#   does not appear in server logs or error messages.
 # ---------------------------------------------------------------------------
 
 function Get-GitHubRunnerRegistration {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string] $Pat,
+        [string] $Token,
 
         [Parameter(Mandatory)]
         [string] $GithubUrl,
@@ -34,10 +34,13 @@ function Get-GitHubRunnerRegistration {
         [string] $RunnerName
     )
 
-    $response = Invoke-GitHubRunnersApi `
-        -Pat       $Pat `
-        -GithubUrl $GithubUrl `
-        -Suffix    '?per_page=100'
+    $parts = $GithubUrl.TrimEnd('/') -split '/'
+    $owner = $parts[-2]
+    $repo  = $parts[-1]
+
+    $response = Invoke-GitHubApi `
+        -Token    $Token `
+        -Endpoint "repos/$owner/$repo/actions/runners?per_page=100"
 
     # Select-Object -ErrorAction SilentlyContinue guards against an absent
     # 'runners' property under Set-StrictMode -Version Latest, which would

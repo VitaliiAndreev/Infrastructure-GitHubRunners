@@ -52,14 +52,14 @@ if (-not $_common -or $_common.Version -lt [Version]'1.3.3') {
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
 # Dot-source helpers after Infrastructure.Common is loaded so
-# Assert-RequiredProperties is available inside their function bodies.
+# Assert-RequiredProperties and Invoke-GitHubApi are available inside their
+# function bodies.
 . "$PSScriptRoot\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1"
 . "$PSScriptRoot\registration\common\config\Join-RunnerDeployCredentials.ps1"
 . "$PSScriptRoot\registration\common\config\Read-GitHubPat.ps1"
 . "$PSScriptRoot\registration\common\config\Read-GitHubRunnersConfig.ps1"
 . "$PSScriptRoot\registration\common\config\Read-VmDeployPasswords.ps1"
 . "$PSScriptRoot\registration\common\github\Get-GitHubRunnerRegistration.ps1"
-. "$PSScriptRoot\registration\common\github\Invoke-GitHubRunnersApi.ps1"
 . "$PSScriptRoot\registration\common\infra\Get-RunnerPaths.ps1"
 . "$PSScriptRoot\registration\common\infra\Test-RunnerVmConnectivity.ps1"
 . "$PSScriptRoot\registration\common\service\Get-RunnerServiceName.ps1"
@@ -93,14 +93,14 @@ Invoke-ModuleInstall -ModuleName 'Posh-SSH'
 Use-MicrosoftPowerShellSecretStoreProvider
 
 # ---------------------------------------------------------------------------
-# Prompt for the GitHub PAT
+# Prompt for the GitHub token
 #    Held in memory only. Used to authenticate GitHub API calls: checking
 #    runner registration status, fetching short-lived removal tokens, and
 #    deleting runners directly in force mode.
 #    Required scope: 'repo' for private repos, 'public_repo' for public.
 # ---------------------------------------------------------------------------
 
-$pat = Read-GitHubPat
+$token = Read-GitHubPat
 
 # ---------------------------------------------------------------------------
 # Read configs from vaults
@@ -171,7 +171,7 @@ foreach ($group in $vmGroups) {
                 -SshClient $sshClient `
                 -VmName    $vmName `
                 -Targets   $group.Group `
-                -Pat       $pat
+                -Token     $token
         }
         catch [Renci.SshNet.Common.SshConnectionException] {
             Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
@@ -188,7 +188,7 @@ foreach ($group in $vmGroups) {
         foreach ($target in $group.Group) {
             $entry        = $target.Entry
             $registration = Get-GitHubRunnerRegistration `
-                -Pat        $pat `
+                -Token      $token `
                 -GithubUrl  $entry.githubUrl `
                 -RunnerName $entry.runnerName
 
@@ -203,7 +203,7 @@ foreach ($group in $vmGroups) {
                 Write-Host ("[$vmName] Runner '$($entry.runnerName)': unreachable " +
                     "- removing from GitHub (force mode).") -ForegroundColor Yellow
                 Remove-GitHubRunner `
-                    -Pat       $pat `
+                    -Token     $token `
                     -GithubUrl $entry.githubUrl `
                     -RunnerId  $registration.id
             }

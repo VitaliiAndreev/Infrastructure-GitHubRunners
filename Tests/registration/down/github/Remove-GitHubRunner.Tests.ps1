@@ -1,5 +1,5 @@
 BeforeAll {
-    function Invoke-GitHubRunnersApi { param($Pat, $GithubUrl, $Suffix, $Method) }
+    function Invoke-GitHubApi { param($Token, $Endpoint, $Uri, $Method) }
 
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\down\github\Remove-GitHubRunner.ps1"
 
@@ -16,31 +16,31 @@ BeforeAll {
 Describe 'Remove-GitHubRunner' {
 
     Context 'DELETE request' {
-        It 'calls the DELETE endpoint with the runner ID as the suffix' {
-            Mock Invoke-GitHubRunnersApi {}
+        It 'calls the DELETE endpoint with the runner ID in the URI' {
+            Mock Invoke-GitHubApi {}
 
-            Remove-GitHubRunner -Pat 'ghp_test' `
+            Remove-GitHubRunner -Token 'ghp_test' `
                 -GithubUrl 'https://github.com/user/repo-a' -RunnerId 42
 
-            Should -Invoke Invoke-GitHubRunnersApi -Times 1 -ParameterFilter {
-                $Suffix -eq 42 -and $Method -eq 'Delete'
+            Should -Invoke Invoke-GitHubApi -Times 1 -ParameterFilter {
+                $Endpoint -like '*runners/42' -and $Method -eq 'Delete'
             }
         }
     }
 
     Context '404 handling' {
         It 'does not throw when the runner is already gone (404)' {
-            Mock Invoke-GitHubRunnersApi { throw (New-FakeHttpException 404) }
+            Mock Invoke-GitHubApi { throw (New-FakeHttpException 404) }
 
-            { Remove-GitHubRunner -Pat 'ghp_test' `
+            { Remove-GitHubRunner -Token 'ghp_test' `
                 -GithubUrl 'https://github.com/user/repo-a' -RunnerId 42 `
             } | Should -Not -Throw
         }
 
         It 'rethrows non-404 errors' {
-            Mock Invoke-GitHubRunnersApi { throw (New-FakeHttpException 403) }
+            Mock Invoke-GitHubApi { throw (New-FakeHttpException 403) }
 
-            { Remove-GitHubRunner -Pat 'ghp_test' `
+            { Remove-GitHubRunner -Token 'ghp_test' `
                 -GithubUrl 'https://github.com/user/repo-a' -RunnerId 42 `
             } | Should -Throw
         }

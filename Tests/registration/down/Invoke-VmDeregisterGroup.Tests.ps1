@@ -1,9 +1,9 @@
 BeforeAll {
-    function Get-GitHubRunnerRegistration { param($Pat, $GithubUrl, $RunnerName) }
+    function Get-GitHubRunnerRegistration { param($Token, $GithubUrl, $RunnerName) }
     function Get-RunnerPaths              { param($RunnerUser, $RunnerName)
         [PSCustomObject] @{ RunnerDir = "/runners/$RunnerName" } }
     function Invoke-RunnerConfigRemove    { param($SshClient, $VmName, $RunnerUser,
-                                                  $Entry, $RunnerDir, $Pat) }
+                                                  $Entry, $RunnerDir, $Token) }
     function Remove-RunnerFiles           { param($SshClient, $VmName, $RunnerName, $RunnerDir) }
     function Remove-RunnerService         { param($SshClient, $VmName, $RunnerName, $RunnerDir) }
 
@@ -33,7 +33,7 @@ Describe 'Invoke-VmDeregisterGroup' {
             Mock Remove-RunnerFiles           {}
 
             Invoke-VmDeregisterGroup -SshClient $Script:FakeSsh -VmName 'vm-01' `
-                -Targets @(New-Target 'runner-a') -Pat 'pat'
+                -Targets @(New-Target 'runner-a') -Token 'token'
 
             Should -Invoke Remove-RunnerService -Times 1
         }
@@ -47,7 +47,7 @@ Describe 'Invoke-VmDeregisterGroup' {
             Mock Remove-RunnerFiles           {}
 
             Invoke-VmDeregisterGroup -SshClient $Script:FakeSsh -VmName 'vm-01' `
-                -Targets @(New-Target 'runner-a') -Pat 'pat'
+                -Targets @(New-Target 'runner-a') -Token 'token'
 
             Should -Invoke Invoke-RunnerConfigRemove -Times 1
         }
@@ -59,7 +59,7 @@ Describe 'Invoke-VmDeregisterGroup' {
             Mock Remove-RunnerFiles           {}
 
             Invoke-VmDeregisterGroup -SshClient $Script:FakeSsh -VmName 'vm-01' `
-                -Targets @(New-Target 'runner-a') -Pat 'pat'
+                -Targets @(New-Target 'runner-a') -Token 'token'
 
             Should -Invoke Invoke-RunnerConfigRemove -Times 0
         }
@@ -73,7 +73,7 @@ Describe 'Invoke-VmDeregisterGroup' {
             Mock Remove-RunnerFiles           {}
 
             Invoke-VmDeregisterGroup -SshClient $Script:FakeSsh -VmName 'vm-01' `
-                -Targets @(New-Target 'runner-a') -Pat 'pat'
+                -Targets @(New-Target 'runner-a') -Token 'token'
 
             Should -Invoke Remove-RunnerFiles -Times 1
         }
@@ -85,7 +85,7 @@ Describe 'Invoke-VmDeregisterGroup' {
             Mock Remove-RunnerFiles           {}
 
             Invoke-VmDeregisterGroup -SshClient $Script:FakeSsh -VmName 'vm-01' `
-                -Targets @(New-Target 'runner-a') -Pat 'pat'
+                -Targets @(New-Target 'runner-a') -Token 'token'
 
             Should -Invoke Remove-RunnerFiles -Times 1
         }
@@ -99,7 +99,7 @@ Describe 'Invoke-VmDeregisterGroup' {
             Mock Remove-RunnerFiles           {}
 
             Invoke-VmDeregisterGroup -SshClient $Script:FakeSsh -VmName 'vm-01' `
-                -Targets @(New-Target 'runner-a'; New-Target 'runner-b') -Pat 'pat'
+                -Targets @(New-Target 'runner-a'; New-Target 'runner-b') -Token 'token'
 
             Should -Invoke Remove-RunnerService -Times 2
             Should -Invoke Remove-RunnerFiles   -Times 2

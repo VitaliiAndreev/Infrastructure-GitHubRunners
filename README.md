@@ -9,7 +9,7 @@ provisioned by
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
 - [Config schema](#config-schema)
-- [PAT requirements](#pat-requirements)
+- [Token requirements](#token-requirements)
 - [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
 - [Idempotency](#idempotency)
 - [Deregistration](#deregistration)
@@ -49,8 +49,8 @@ provisioned by
 .\hyper-v\ubuntu\deregister-runners.ps1
 ```
 
-Both scripts prompt for a GitHub PAT at startup. The PAT is held in memory
-only and is never written to disk or logged.
+Both scripts prompt for a GitHub token at startup. The token is held in
+memory only and is never written to disk or logged.
 
 ---
 
@@ -80,16 +80,16 @@ deploy credentials. Never add passwords to this file.
 
 ---
 
-## PAT requirements
+## Token requirements
 
-The PAT is prompted at runtime and never stored. Required scopes:
+The token is prompted at runtime and never stored. Required scopes:
 
 | Repo visibility | Required scope |
 |---|---|
 | Private | `repo` |
 | Public | `public_repo` |
 
-The PAT is used to:
+The token is used to:
 - resolve the latest runner version via the GitHub Releases API,
 - check existing runner registration via the GitHub Runners API,
 - fetch short-lived registration and removal tokens,
@@ -159,7 +159,7 @@ cleanly removes each runner from both GitHub and the VM.
 .\hyper-v\ubuntu\deregister-runners.ps1 -Force
 ```
 
-Required PAT scopes are the same as for registration (`repo` for private
+Required token scopes are the same as for registration (`repo` for private
 repos, `public_repo` for public).
 
 ### Unreachable VM behaviour
@@ -193,7 +193,7 @@ hyper-v/ubuntu/
   registration/
     common/                   Shared between registration and deregistration
       config/                 Vault reads, JSON parsing, credential joining
-      github/                 GitHub REST API calls (shared wrapper + read)
+      github/                 GitHub REST API calls (shared read)
       infra/                  Connectivity checks, path computation
       service/                Systemd service state queries
     up/                       Runner registration (install and register)

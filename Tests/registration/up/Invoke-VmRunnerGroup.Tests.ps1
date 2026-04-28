@@ -1,10 +1,10 @@
 BeforeAll {
-    function Get-GitHubRunnerRegistration    { param($Pat, $GithubUrl, $RunnerName) }
+    function Get-GitHubRunnerRegistration    { param($Token, $GithubUrl, $RunnerName) }
     function Get-RunnerPaths                 { param($RunnerUser, $RunnerVersion, $RunnerName)
         [PSCustomObject] @{ CacheDir = '/cache'; TarPath = '/cache/runner.tar.gz'
                             RunnerDir = "/runners/$RunnerName" } }
     function Get-RunnerServiceName           { param($SshClient, $RunnerName) }
-    function Invoke-GitHubRunnersApi         { param($Pat, $GithubUrl, $Suffix, $Method) }
+    function Invoke-GitHubApi                { param($Token, $Endpoint, $Uri, $Method) }
     function Invoke-RunnerInstall            { param($SshClient, $VmName, $RunnerEntries, $RunnerVersion) }
     function Invoke-RunnerRegistration       { param($SshClient, $VmName, $RunnerUser, $Entry,
                                                      $Token, $RunnerDir, [switch] $SkipConfig) }
@@ -44,7 +44,7 @@ Describe 'Invoke-VmRunnerGroup' {
                 -VmName        'vm-01' `
                 -Targets       @(New-Target 'runner-a') `
                 -RunnerVersion '2.317.0' `
-                -Pat           'pat'
+                -Token         'token'
 
             Should -Invoke Invoke-RunnerRegistration -Times 0
             Should -Invoke Start-RunnerService       -Times 0
@@ -65,7 +65,7 @@ Describe 'Invoke-VmRunnerGroup' {
                 -VmName        'vm-01' `
                 -Targets       @(New-Target 'runner-a') `
                 -RunnerVersion '2.317.0' `
-                -Pat           'pat'
+                -Token         'token'
 
             Should -Invoke Start-RunnerService       -Times 1
             Should -Invoke Invoke-RunnerRegistration -Times 0
@@ -84,7 +84,7 @@ Describe 'Invoke-VmRunnerGroup' {
                 -VmName        'vm-01' `
                 -Targets       @(New-Target 'runner-a') `
                 -RunnerVersion '2.317.0' `
-                -Pat           'pat'
+                -Token         'token'
 
             Should -Invoke Invoke-RunnerRegistration -Times 1 -ParameterFilter { $SkipConfig }
             Should -Invoke Start-RunnerService       -Times 0
@@ -96,7 +96,7 @@ Describe 'Invoke-VmRunnerGroup' {
             Mock Invoke-RunnerInstall         {}
             Mock Get-GitHubRunnerRegistration { $null }
             Mock Test-RunnerServiceActive     { $false }
-            Mock Invoke-GitHubRunnersApi      { [PSCustomObject] @{ token = 'reg_token' } }
+            Mock Invoke-GitHubApi             { [PSCustomObject] @{ token = 'reg_token' } }
             Mock Invoke-RunnerRegistration    {}
 
             Invoke-VmRunnerGroup `
@@ -104,7 +104,7 @@ Describe 'Invoke-VmRunnerGroup' {
                 -VmName        'vm-01' `
                 -Targets       @(New-Target 'runner-a') `
                 -RunnerVersion '2.317.0' `
-                -Pat           'pat'
+                -Token         'token'
 
             Should -Invoke Invoke-RunnerRegistration -Times 1 -ParameterFilter {
                 $RunnerUser -eq 'u-actions-runner' -and $Token -eq 'reg_token' -and -not $SkipConfig
@@ -123,7 +123,7 @@ Describe 'Invoke-VmRunnerGroup' {
                 -VmName        'vm-01' `
                 -Targets       @(New-Target 'runner-a' 'user-one'; New-Target 'runner-b' 'user-two') `
                 -RunnerVersion '2.317.0' `
-                -Pat           'pat'
+                -Token         'token'
 
             Should -Invoke Invoke-RunnerInstall -Times 2
         }
@@ -138,7 +138,7 @@ Describe 'Invoke-VmRunnerGroup' {
                 -VmName        'vm-01' `
                 -Targets       @(New-Target 'runner-a' 'user-one'; New-Target 'runner-b' 'user-two') `
                 -RunnerVersion '2.317.0' `
-                -Pat           'pat'
+                -Token         'token'
 
             Should -Invoke Invoke-RunnerInstall -Times 1 -ParameterFilter {
                 $RunnerEntries.Count -eq 1 -and $RunnerEntries[0].runnerName -eq 'runner-a'
