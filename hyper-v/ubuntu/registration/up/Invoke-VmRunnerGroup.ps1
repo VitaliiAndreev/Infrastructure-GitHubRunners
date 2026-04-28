@@ -36,9 +36,9 @@ function Invoke-VmRunnerGroup {
         [Parameter(Mandatory)]
         [string] $RunnerVersion,
 
-        # GitHub PAT - used for registration API calls only, never logged.
+        # GitHub token - used for registration API calls only, never logged.
         [Parameter(Mandatory)]
-        [string] $Pat
+        [string] $Token
     )
 
     # Group by runner service user so each user's tarball cache and runner
@@ -63,7 +63,7 @@ function Invoke-VmRunnerGroup {
                 -RunnerName    $entry.runnerName
 
             $registration = Get-GitHubRunnerRegistration `
-                -Pat        $Pat `
+                -Token      $Token `
                 -GithubUrl  $entry.githubUrl `
                 -RunnerName $entry.runnerName
 
@@ -105,19 +105,22 @@ function Invoke-VmRunnerGroup {
                 }
             }
             else {
-                # Token expires in 1hr - fetch immediately before use.
-                $token = (Invoke-GitHubRunnersApi `
-                    -Pat       $Pat `
-                    -GithubUrl $entry.githubUrl `
-                    -Suffix    'registration-token' `
-                    -Method    'Post').token
+                $parts    = $entry.githubUrl.TrimEnd('/') -split '/'
+                $owner    = $parts[-2]
+                $repo     = $parts[-1]
+
+                # Registration token expires in 1hr - fetch immediately before use.
+                $regToken = (Invoke-GitHubApi `
+                    -Token    $Token `
+                    -Endpoint "repos/$owner/$repo/actions/runners/registration-token" `
+                    -Method   'Post').token
 
                 Invoke-RunnerRegistration `
                     -SshClient  $SshClient `
                     -VmName     $VmName `
                     -RunnerUser $runnerUser `
                     -Entry      $entry `
-                    -Token      $token `
+                    -Token      $regToken `
                     -RunnerDir  $entryPaths.RunnerDir
             }
         }

@@ -32,9 +32,7 @@ function ConvertFrom-GitHubRunnersConfigJson {
         throw "Invalid JSON: $_"
     }
 
-    # In PS 5.1, ConvertFrom-Json unwraps single-element JSON arrays into a
-    # bare PSCustomObject. @() normalises the result to an array in both cases.
-    $entries = @($parsed)
+    $entries = ConvertTo-Array $parsed
 
     if ($entries.Count -eq 0) {
         throw "Config must be a non-empty JSON array of runner entries."
@@ -48,9 +46,7 @@ function ConvertFrom-GitHubRunnersConfigJson {
                           'runnerLabels') `
             -Context    "Runner entry"
 
-        # runnerLabels must be a non-empty array. @() normalises PS 5.1
-        # single-element JSON array unwrap to a consistent array.
-        $labels = @($entry.runnerLabels)
+        $labels = ConvertTo-Array $entry.runnerLabels
         if ($labels.Count -eq 0) {
             throw "Runner entry '$($entry.runnerName)': runnerLabels must not be empty."
         }

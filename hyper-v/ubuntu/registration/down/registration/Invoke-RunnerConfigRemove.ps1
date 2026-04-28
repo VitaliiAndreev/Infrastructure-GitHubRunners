@@ -11,7 +11,7 @@
 #   existing SSH connection.
 #
 #   Steps performed:
-#     1. Fetch a short-lived removal token via Invoke-GitHubRunnersApi.
+#     1. Fetch a short-lived removal token via Invoke-GitHubApi.
 #     2. Run config.sh remove --unattended as RunnerUser from the runner
 #        directory. config.sh runs as RunnerUser (via sudoers-permitted
 #        'sudo -u') so credential files owned by the service user are
@@ -44,19 +44,21 @@ function Invoke-RunnerConfigRemove {
         [Parameter(Mandatory)]
         [string] $RunnerDir,
 
-        # GitHub PAT - used to fetch the removal token only, never logged.
+        # GitHub token - used to fetch the removal token only, never logged.
         [Parameter(Mandatory)]
-        [string] $Pat
+        [string] $Token
     )
 
     $runnerName = $Entry.runnerName
+    $parts      = $Entry.githubUrl.TrimEnd('/') -split '/'
+    $owner      = $parts[-2]
+    $repo       = $parts[-1]
 
-    # Token expires in 1hr - fetch immediately before use.
-    $token = (Invoke-GitHubRunnersApi `
-        -Pat       $Pat `
-        -GithubUrl $Entry.githubUrl `
-        -Suffix    'remove-token' `
-        -Method    'Post').token
+    # Removal token expires in 1hr - fetch immediately before use.
+    $removeToken = (Invoke-GitHubApi `
+        -Token    $Token `
+        -Endpoint "repos/$owner/$repo/actions/runners/remove-token" `
+        -Method   'Post').token
 
     # config.sh remove deregisters the runner from GitHub and deletes local
     # credential files. Token is intentionally not included in any throw
@@ -65,7 +67,7 @@ function Invoke-RunnerConfigRemove {
         -SshClient $SshClient `
         -Command   ("sudo -u $RunnerUser '$RunnerDir/config.sh'" +
                     " remove" +
-                    " --token '$token'" +
+                    " --token '$removeToken'" +
                     " --unattended") `
         -ErrorAction Stop
 

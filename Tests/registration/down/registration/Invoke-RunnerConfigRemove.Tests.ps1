@@ -1,5 +1,5 @@
 BeforeAll {
-    function Invoke-GitHubRunnersApi { param($Pat, $GithubUrl, $Suffix, $Method) }
+    function Invoke-GitHubApi     { param($Token, $Endpoint, $Uri, $Method) }
     function Invoke-SshClientCommand { param($SshClient, $Command, $ErrorAction) }
 
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\down\registration\Invoke-RunnerConfigRemove.ps1"
@@ -19,7 +19,7 @@ Describe 'Invoke-RunnerConfigRemove' {
 
     Context 'token fetch' {
         It 'fetches a removal token before calling config.sh' {
-            Mock Invoke-GitHubRunnersApi { [PSCustomObject] @{ token = 'rem_token' } }
+            Mock Invoke-GitHubApi     { [PSCustomObject] @{ token = 'rem_token' } }
             Mock Invoke-SshClientCommand { [PSCustomObject] @{ ExitStatus = 0; Error = '' } }
 
             Invoke-RunnerConfigRemove `
@@ -28,17 +28,17 @@ Describe 'Invoke-RunnerConfigRemove' {
                 -RunnerUser 'u-actions-runner' `
                 -Entry      (New-Entry 'runner-a') `
                 -RunnerDir  $Script:RunnerDir `
-                -Pat        'ghp_test'
+                -Token      'ghp_test'
 
-            Should -Invoke Invoke-GitHubRunnersApi -Times 1 -ParameterFilter {
-                $Suffix -eq 'remove-token' -and $Method -eq 'Post'
+            Should -Invoke Invoke-GitHubApi -Times 1 -ParameterFilter {
+                $Endpoint -like '*remove-token' -and $Method -eq 'Post'
             }
         }
     }
 
     Context 'config.sh remove' {
         It 'calls config.sh remove with the correct token, runner user, and --unattended' {
-            Mock Invoke-GitHubRunnersApi { [PSCustomObject] @{ token = 'rem_token' } }
+            Mock Invoke-GitHubApi     { [PSCustomObject] @{ token = 'rem_token' } }
             Mock Invoke-SshClientCommand { [PSCustomObject] @{ ExitStatus = 0; Error = '' } }
 
             Invoke-RunnerConfigRemove `
@@ -47,7 +47,7 @@ Describe 'Invoke-RunnerConfigRemove' {
                 -RunnerUser 'u-actions-runner' `
                 -Entry      (New-Entry 'runner-a') `
                 -RunnerDir  $Script:RunnerDir `
-                -Pat        'ghp_test'
+                -Token      'ghp_test'
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
                 $Command -like "*sudo -u u-actions-runner*config.sh*" -and
@@ -58,7 +58,7 @@ Describe 'Invoke-RunnerConfigRemove' {
         }
 
         It 'throws when config.sh remove exits non-zero' {
-            Mock Invoke-GitHubRunnersApi { [PSCustomObject] @{ token = 'rem_token' } }
+            Mock Invoke-GitHubApi     { [PSCustomObject] @{ token = 'rem_token' } }
             Mock Invoke-SshClientCommand {
                 [PSCustomObject] @{ ExitStatus = 1; Error = 'remove error' }
             }
@@ -69,7 +69,7 @@ Describe 'Invoke-RunnerConfigRemove' {
                 -RunnerUser 'u-actions-runner' `
                 -Entry      (New-Entry 'runner-a') `
                 -RunnerDir  $Script:RunnerDir `
-                -Pat        'ghp_test'
+                -Token      'ghp_test'
             } | Should -Throw '*config.sh remove failed*'
         }
     }

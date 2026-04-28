@@ -32,20 +32,20 @@ Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
     -Scope CurrentUser -Force -ForceBootstrap | Out-Null
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'1.2.1') {
+if (-not $_common -or $_common.Version -lt [Version]'1.3.3') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
 # Dot-source helpers after Infrastructure.Common is loaded so
-# Assert-RequiredProperties is available inside their function bodies.
+# Assert-RequiredProperties and Invoke-GitHubApi are available inside their
+# function bodies.
 . "$PSScriptRoot\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1"
 . "$PSScriptRoot\registration\common\config\Join-RunnerDeployCredentials.ps1"
 . "$PSScriptRoot\registration\common\config\Read-GitHubPat.ps1"
 . "$PSScriptRoot\registration\common\config\Read-GitHubRunnersConfig.ps1"
 . "$PSScriptRoot\registration\common\config\Read-VmDeployPasswords.ps1"
 . "$PSScriptRoot\registration\common\github\Get-GitHubRunnerRegistration.ps1"
-. "$PSScriptRoot\registration\common\github\Invoke-GitHubRunnersApi.ps1"
 . "$PSScriptRoot\registration\common\infra\Get-RunnerPaths.ps1"
 . "$PSScriptRoot\registration\common\infra\Test-RunnerVmConnectivity.ps1"
 . "$PSScriptRoot\registration\common\service\Get-RunnerServiceName.ps1"
@@ -81,14 +81,14 @@ Invoke-ModuleInstall -ModuleName 'Posh-SSH'
 Use-MicrosoftPowerShellSecretStoreProvider
 
 # ---------------------------------------------------------------------------
-# Prompt for the GitHub PAT
+# Prompt for the GitHub token
 #    Held in memory only. Used to authenticate GitHub API calls: resolving
 #    the latest runner version, checking runner registration status, and
 #    fetching short-lived registration tokens.
 #    Required scope: 'repo' for private repos, 'public_repo' for public.
 # ---------------------------------------------------------------------------
 
-$pat = Read-GitHubPat
+$token = Read-GitHubPat
 
 # ---------------------------------------------------------------------------
 # Read configs from vaults
@@ -118,7 +118,7 @@ $reachable = @(Test-RunnerVmConnectivity -Targets $targets)
 # Resolve the latest runner version once - all VMs receive the same binary.
 # ---------------------------------------------------------------------------
 
-$runnerVersion = Resolve-RunnerVersion -Pat $pat
+$runnerVersion = Resolve-RunnerVersion -Token $token
 
 # ---------------------------------------------------------------------------
 # Install runner binary and register each runner via SSH
@@ -162,7 +162,7 @@ foreach ($group in $vmGroups) {
             -VmName        $vmName `
             -Targets       $group.Group `
             -RunnerVersion $runnerVersion `
-            -Pat           $pat
+            -Token         $token
     }
     catch [Renci.SshNet.Common.SshConnectionException] {
         Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"

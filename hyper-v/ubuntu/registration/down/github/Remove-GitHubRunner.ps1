@@ -22,7 +22,7 @@ function Remove-GitHubRunner {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]
-        [string] $Pat,
+        [string] $Token,
 
         [Parameter(Mandatory)]
         [string] $GithubUrl,
@@ -31,12 +31,15 @@ function Remove-GitHubRunner {
         [int] $RunnerId
     )
 
+    $parts = $GithubUrl.TrimEnd('/') -split '/'
+    $owner = $parts[-2]
+    $repo  = $parts[-1]
+
     try {
-        Invoke-GitHubRunnersApi `
-            -Pat       $Pat `
-            -GithubUrl $GithubUrl `
-            -Suffix    $RunnerId `
-            -Method    'Delete'
+        Invoke-GitHubApi `
+            -Token    $Token `
+            -Endpoint "repos/$owner/$repo/actions/runners/$RunnerId" `
+            -Method   'Delete'
     }
     catch {
         # 404 means the runner is already gone - treat as success.
