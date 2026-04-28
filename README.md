@@ -20,6 +20,7 @@ provisioned by
 ## Prerequisites
 
 - Windows host with Hyper-V and PowerShell 5.1+.
+- `Infrastructure.Common` >= `1.3.3` installed from PSGallery.
 - VMs provisioned by **Infrastructure-Vm-Provisioner** and reachable.
 - A deploy user and a runner service user created on each VM by
   **Infrastructure-Vm-Users** before running this script (named in the

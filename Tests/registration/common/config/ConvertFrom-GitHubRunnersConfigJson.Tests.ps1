@@ -7,6 +7,14 @@ BeforeAll {
         param($Object, $Properties, $Context)
     }
 
+    # ConvertTo-Array is provided by Infrastructure.Common at runtime.
+    # Stub it here so the unit tests have no cross-repo dependency.
+    function ConvertTo-Array {
+        param([AllowNull()] $InputObject)
+        if ($null -eq $InputObject) { return , @() }
+        , @($InputObject)
+    }
+
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1"
 
     # Builds a minimal valid runner entry JSON string with all required fields.
@@ -51,8 +59,8 @@ Describe 'ConvertFrom-GitHubRunnersConfigJson' {
 
         It 'normalises a bare JSON object to a 1-element array (PS 5.1 unwrap)' {
             # ConvertFrom-Json in PS 5.1 unwraps a single-element JSON array
-            # into a bare PSCustomObject. @() in the function normalises this
-            # so callers always receive an array.
+            # into a bare PSCustomObject. ConvertTo-Array normalises this so
+            # callers always receive an array.
             $result = @(ConvertFrom-GitHubRunnersConfigJson -Json (New-ValidEntryJson))
             $result | Should -HaveCount 1
         }
