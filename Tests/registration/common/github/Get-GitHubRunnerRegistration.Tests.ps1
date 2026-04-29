@@ -19,6 +19,30 @@ Describe 'Get-GitHubRunnerRegistration' {
                 $Endpoint -like '*runners?per_page=100'
             }
         }
+
+        It 'builds the endpoint from the owner and repo parsed from GithubUrl' {
+            Mock Invoke-GitHubApi { [PSCustomObject]@{ runners = @() } }
+
+            Get-GitHubRunnerRegistration `
+                -Token      'ghp_test' `
+                -GithubUrl  'https://github.com/myorg/myrepo' `
+                -RunnerName 'runner-a'
+
+            Should -Invoke Invoke-GitHubApi -ParameterFilter {
+                $Endpoint -eq 'repos/myorg/myrepo/actions/runners?per_page=100'
+            }
+        }
+
+        It 'passes the token to Invoke-GitHubApi' {
+            Mock Invoke-GitHubApi { [PSCustomObject]@{ runners = @() } }
+
+            Get-GitHubRunnerRegistration `
+                -Token      'ghp_test' `
+                -GithubUrl  'https://github.com/user/repo-a' `
+                -RunnerName 'runner-a'
+
+            Should -Invoke Invoke-GitHubApi -ParameterFilter { $Token -eq 'ghp_test' }
+        }
     }
 
     Context 'return value' {
