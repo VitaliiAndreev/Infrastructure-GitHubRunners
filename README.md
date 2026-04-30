@@ -6,6 +6,7 @@ provisioned by
 
 ## Index
 
+- [Requirements](#requirements)
 - [Prerequisites](#prerequisites)
 - [Quick start](#quick-start)
 - [Config schema](#config-schema)
@@ -17,10 +18,16 @@ provisioned by
 
 ---
 
+## Requirements
+
+PowerShell 7+ (`pwsh`).
+
+---
+
 ## Prerequisites
 
-- Windows host with Hyper-V and PowerShell 5.1+.
-- `Infrastructure.Common` >= `1.3.3` installed from PSGallery.
+- Windows host with Hyper-V and PowerShell 7+.
+- `Infrastructure.Common` >= `2.0.0` installed from PSGallery.
 - VMs provisioned by **Infrastructure-Vm-Provisioner** and reachable.
 - A deploy user and a runner service user created on each VM by
   **Infrastructure-Vm-Users** before running this script (named in the

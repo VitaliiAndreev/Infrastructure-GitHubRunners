@@ -57,10 +57,10 @@ Describe 'ConvertFrom-GitHubRunnersConfigJson' {
             $result[0].vmName | Should -Be 'ubuntu-01-ci'
         }
 
-        It 'normalises a bare JSON object to a 1-element array (PS 5.1 unwrap)' {
-            # ConvertFrom-Json in PS 5.1 unwraps a single-element JSON array
-            # into a bare PSCustomObject. ConvertTo-Array normalises this so
-            # callers always receive an array.
+        It 'normalises a bare JSON object to a 1-element array' {
+            # ConvertTo-Array normalises a bare PSCustomObject (as produced by
+            # ConvertFrom-Json for a single-element input) so callers always
+            # receive an array.
             $result = @(ConvertFrom-GitHubRunnersConfigJson -Json (New-ValidEntryJson))
             $result | Should -HaveCount 1
         }
