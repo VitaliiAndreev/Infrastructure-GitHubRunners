@@ -123,7 +123,7 @@ Start-Sleep -Seconds 1
 # -----------------------------------------------------------------------
 
 Write-Step 5 'installing Infrastructure.Common'
-Install-Module Infrastructure.Common -MinimumVersion '2.0.0' `
+Install-Module Infrastructure.Common -MinimumVersion '2.0.1' `
     -Scope CurrentUser -Force -SkipPublisherCheck
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
