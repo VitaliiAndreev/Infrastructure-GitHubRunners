@@ -56,9 +56,6 @@ Describe 'Read-VmDeployPasswords' {
         }
 
         It 'skips a VM entry where the users property is absent' {
-            # ConvertFrom-Json in PS 5.1 omits properties whose JSON value is
-            # an empty array, so 'users' may not exist on the object at all.
-            # Select-Object -ExpandProperty with SilentlyContinue handles this.
             Mock Get-InfrastructureSecret {
                 '[{"vmName":"ubuntu-01"}]'
             }

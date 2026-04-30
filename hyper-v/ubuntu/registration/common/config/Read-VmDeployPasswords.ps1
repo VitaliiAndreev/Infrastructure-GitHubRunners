@@ -34,16 +34,13 @@ function Read-VmDeployPasswords {
     # credentials in O(1) rather than scanning the list per runner entry.
     $index = @{}
     foreach ($vm in $vms) {
-        # Select-Object -ExpandProperty with SilentlyContinue avoids
-        # StrictMode errors: ConvertFrom-Json in PS 5.1 omits properties
-        # whose JSON value is an empty array, so 'users' may not exist.
-        $usersValue = $vm | Select-Object -ExpandProperty users `
-                                -ErrorAction SilentlyContinue
+        # PSObject.Properties['key'].Value returns $null when the property is
+        # absent, avoiding StrictMode errors without error suppression.
+        $usersValue = $vm.PSObject.Properties['users']?.Value
         foreach ($user in @($usersValue)) {
             if ($null -eq $user) { continue }
-            # Same guard for 'password': users without it use key-based auth.
-            $pwValue = $user | Select-Object -ExpandProperty password `
-                                   -ErrorAction SilentlyContinue
+            # password is optional: users without it use key-based auth.
+            $pwValue = $user.PSObject.Properties['password']?.Value
             if ($null -ne $pwValue) {
                 # Passwords are plain strings throughout this pipeline.
                 # They originate as JSON field values - ConvertFrom-Json
