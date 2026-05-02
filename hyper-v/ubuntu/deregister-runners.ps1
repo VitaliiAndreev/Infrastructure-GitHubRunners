@@ -32,7 +32,12 @@
 
 [CmdletBinding()]
 param(
-    [switch] $Force
+    [switch] $Force,
+
+    # GitHub token. When provided, skips the interactive Read-GitHubPat
+    # prompt - required for unattended callers such as the E2E agent.
+    [Parameter()]
+    [string] $Token = ''
 )
 
 Set-StrictMode -Version Latest
@@ -100,7 +105,9 @@ Use-MicrosoftPowerShellSecretStoreProvider
 #    Required scope: 'repo' for private repos, 'public_repo' for public.
 # ---------------------------------------------------------------------------
 
-$token = Read-GitHubPat
+if (-not $Token) {
+    $Token = Read-GitHubPat
+}
 
 # ---------------------------------------------------------------------------
 # Read configs from vaults
