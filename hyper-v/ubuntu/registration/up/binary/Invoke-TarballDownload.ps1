@@ -82,9 +82,17 @@ function Invoke-TarballDownload {
         throw "[$VmName] Failed to purge stale tarballs: $($purge.Error)"
     }
 
+    # --connect-timeout: fail fast if TCP handshake stalls (e.g. firewall drop
+    #   with no RST). --retry 3 covers transient connection failures.
+    # --max-time is intentionally absent: in the E2E path the tarball is
+    #   pre-seeded by Invoke-RunnerTarballPrefetch so this download is only
+    #   reached in non-E2E runs where the transfer duration is unpredictable.
     $dl = Invoke-SshClientCommand `
         -SshClient $SshClient `
-        -Command   "sudo -u $RunnerUser curl -fsSL -o '$tarPath' '$tarUrl'" `
+        -Command   ("sudo -u $RunnerUser curl -fsSL " +
+                    "--connect-timeout 15 " +
+                    "--retry 3 --retry-delay 5 " +
+                    "-o '$tarPath' '$tarUrl'") `
         -ErrorAction Stop
 
     if ($dl.ExitStatus -ne 0) {
