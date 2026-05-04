@@ -127,15 +127,15 @@ $deployPasswords = Read-VmDeployPasswords
 #    Infrastructure-Vm-Users.
 # ---------------------------------------------------------------------------
 
-$targets = @(Join-RunnerDeployCredentials `
+$targets = Join-RunnerDeployCredentials `
     -RunnerEntries   $runnerEntries `
-    -DeployPasswords $deployPasswords)
+    -DeployPasswords $deployPasswords
 
 # ---------------------------------------------------------------------------
 # Ping each matched VM
 # ---------------------------------------------------------------------------
 
-$reachable   = @(Test-RunnerVmConnectivity -Targets $targets)
+$reachable   = Test-RunnerVmConnectivity -Targets $targets
 $reachableVms = $reachable | Group-Object { $_.Entry.vmName } |
     ForEach-Object { $_.Name }
 

@@ -115,15 +115,15 @@ $deployPasswords = Read-VmDeployPasswords
 #    Infrastructure-Vm-Users.
 # ---------------------------------------------------------------------------
 
-$targets = @(Join-RunnerDeployCredentials `
+$targets = Join-RunnerDeployCredentials `
     -RunnerEntries   $runnerEntries `
-    -DeployPasswords $deployPasswords)
+    -DeployPasswords $deployPasswords
 
 # ---------------------------------------------------------------------------
 # Ping each matched VM
 # ---------------------------------------------------------------------------
 
-$reachable = @(Test-RunnerVmConnectivity -Targets $targets)
+$reachable = Test-RunnerVmConnectivity -Targets $targets
 
 # ---------------------------------------------------------------------------
 # Resolve the latest runner version once - all VMs receive the same binary.
