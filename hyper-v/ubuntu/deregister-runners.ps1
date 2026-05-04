@@ -47,8 +47,12 @@ $ErrorActionPreference = 'Stop'
 # for all subsequent module installs. This inline block is the only install
 # logic that cannot be abstracted - you cannot call a function from a module
 # that hasn't been installed yet.
-Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
-    -Scope CurrentUser -Force -ForceBootstrap | Out-Null
+$_nuget = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
+    Sort-Object Version -Descending | Select-Object -First 1
+if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
+    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
+        -Scope CurrentUser -Force -ForceBootstrap | Out-Null
+}
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
 if (-not $_common -or $_common.Version -lt [Version]'2.0.1') {
