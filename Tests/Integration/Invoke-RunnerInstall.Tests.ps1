@@ -14,7 +14,7 @@ AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
 Describe 'Invoke-RunnerInstall' {
 
     AfterEach {
-        & bash -c "rm -rf '/home/$($Script:RunnerUser)/cache' '/home/$($Script:RunnerUser)/runners'"
+        & bash -c "rm -rf '/home/$($Script:RunnerUser)/cache' '/opt/runners'"
     }
 
     BeforeEach {

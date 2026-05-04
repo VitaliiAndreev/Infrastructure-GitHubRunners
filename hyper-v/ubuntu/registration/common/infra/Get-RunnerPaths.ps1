@@ -7,8 +7,13 @@
 # ---------------------------------------------------------------------------
 # Get-RunnerPaths
 #   Single source of truth for remote filesystem path conventions.
-#   All paths follow the layout created by useradd -m in
-#   Infrastructure-Vm-Users: /home/{RunnerUser}/...
+#
+#   RunnerDir lives under /opt/runners/ rather than the runner user's home
+#   directory so that the deploy user can cd into it without needing execute
+#   permission on the home directory (which is 700 by default on Ubuntu).
+#
+#   CacheDir remains under the runner user's home because it holds downloaded
+#   tarballs that no other user needs to access.
 #
 #   Callers pass the returned paths down to leaf SSH functions so that
 #   no leaf function re-derives path structure from user/name inputs.
@@ -37,6 +42,6 @@ function Get-RunnerPaths {
         CacheDir  = $cacheDir
         TarName   = $tarName
         TarPath   = if ($tarName) { "$cacheDir/$tarName" } else { $null }
-        RunnerDir = if ($RunnerName) { "$homeDir/runners/$RunnerName" } else { $null }
+        RunnerDir = if ($RunnerName) { "/opt/runners/$RunnerName" } else { $null }
     }
 }

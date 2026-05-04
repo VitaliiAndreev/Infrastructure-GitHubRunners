@@ -5,7 +5,7 @@ BeforeAll {
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\up\registration\Invoke-RunnerRegistration.ps1"
 
     $Script:FakeSsh   = [PSCustomObject] @{}
-    $Script:RunnerDir = '/home/u-actions-runner/runners/runner-a'
+    $Script:RunnerDir = '/opt/runners/runner-a'
 
     function New-Entry ([string] $RunnerName, [string[]] $Labels = @('self-hosted','ubuntu','x64')) {
         [PSCustomObject] @{

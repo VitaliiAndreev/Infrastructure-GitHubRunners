@@ -142,8 +142,8 @@ Re-running `register-runners.ps1` is safe:
 
 - The runner tarball is downloaded once per version and cached at
   `/home/{runnerUsername}/cache/`. Subsequent runs skip the download.
-- Runner directories (`/home/{runnerUsername}/runners/{runnerName}/`) are
-  only extracted if absent.
+- Runner directories (`/opt/runners/{runnerName}/`) are only extracted if
+  absent.
 - Runners already registered on GitHub with an active systemd service are
   detected and skipped.
 - Runners registered but with a stopped service are restarted without

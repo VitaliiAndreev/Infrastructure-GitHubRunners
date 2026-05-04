@@ -10,7 +10,7 @@ AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
 Describe 'Invoke-RunnerExtract' {
 
     AfterEach {
-        & bash -c "rm -rf '/home/$($Script:RunnerUser)/runners'"
+        & bash -c "rm -rf '/opt/runners/test-runner'"
     }
 
     BeforeEach {

@@ -20,9 +20,9 @@ Describe 'Get-RunnerPaths' {
             $paths.TarPath | Should -Be '/home/u-runner/cache/actions-runner-linux-x64-2.317.0.tar.gz'
         }
 
-        It 'constructs RunnerDir when RunnerName is provided' {
+        It 'constructs RunnerDir under /opt/runners when RunnerName is provided' {
             $paths = Get-RunnerPaths -RunnerUser 'u-runner' -RunnerVersion '2.317.0' -RunnerName 'runner-a'
-            $paths.RunnerDir | Should -Be '/home/u-runner/runners/runner-a'
+            $paths.RunnerDir | Should -Be '/opt/runners/runner-a'
         }
 
         It 'returns null RunnerDir when RunnerName is omitted' {
@@ -32,7 +32,7 @@ Describe 'Get-RunnerPaths' {
 
         It 'returns RunnerDir without RunnerVersion (deregistration path)' {
             $paths = Get-RunnerPaths -RunnerUser 'u-runner' -RunnerName 'runner-a'
-            $paths.RunnerDir | Should -Be '/home/u-runner/runners/runner-a'
+            $paths.RunnerDir | Should -Be '/opt/runners/runner-a'
             $paths.TarName   | Should -BeNullOrEmpty
             $paths.TarPath   | Should -BeNullOrEmpty
         }

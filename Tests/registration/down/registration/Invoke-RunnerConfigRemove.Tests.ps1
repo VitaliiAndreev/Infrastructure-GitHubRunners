@@ -5,7 +5,7 @@ BeforeAll {
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\down\registration\Invoke-RunnerConfigRemove.ps1"
 
     $Script:FakeSsh   = [PSCustomObject] @{}
-    $Script:RunnerDir = '/home/u-actions-runner/runners/runner-a'
+    $Script:RunnerDir = '/opt/runners/runner-a'
 
     function New-Entry ([string] $RunnerName) {
         [PSCustomObject] @{
