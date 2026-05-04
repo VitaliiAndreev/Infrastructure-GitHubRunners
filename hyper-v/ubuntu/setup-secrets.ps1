@@ -71,7 +71,7 @@ Initialize-MicrosoftPowerShellSecretStoreVault `
     @PSBoundParameters `
     -Validate {
         param($json)
-        $entries = @(ConvertFrom-GitHubRunnersConfigJson -Json $json)
+        $entries = ConvertTo-Array (ConvertFrom-GitHubRunnersConfigJson -Json $json)
         Write-Host "[OK] JSON validated - $($entries.Count) runner entry/entries found." `
             -ForegroundColor Green
     }

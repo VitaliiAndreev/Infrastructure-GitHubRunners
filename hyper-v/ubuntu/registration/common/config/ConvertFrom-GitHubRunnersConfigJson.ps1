@@ -11,8 +11,8 @@
 #   Throws a descriptive error on any problem.
 #
 #   Outputs each validated runner entry object to the pipeline. Callers must
-#   wrap the call in @() to collect the result as an array:
-#       $entries = @(ConvertFrom-GitHubRunnersConfigJson -Json $json)
+#   use ConvertTo-Array to collect the result as an array:
+#       $entries = ConvertTo-Array (ConvertFrom-GitHubRunnersConfigJson -Json $json)
 #
 #   Centralised here so the required-field list has a single source of
 #   truth - update it once when the config schema changes.

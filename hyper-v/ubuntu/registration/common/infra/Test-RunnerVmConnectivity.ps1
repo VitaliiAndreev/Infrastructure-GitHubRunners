@@ -36,5 +36,5 @@ function Test-RunnerVmConnectivity {
 
     Write-Host ("$($reachable.Count) of $($Targets.Count) runner " +
         "target(s) reachable.") -ForegroundColor Cyan
-    $reachable.ToArray()
+    ConvertTo-Array $reachable
 }
