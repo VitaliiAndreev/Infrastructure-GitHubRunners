@@ -71,7 +71,7 @@ Describe 'Invoke-TarballDownload' {
         BeforeEach {
             Mock Invoke-SshClientCommand {
                 param($SshClient, $Command)
-                $exit = if ($Command -like 'test -f*') { 1 } else { 0 }
+                $exit = if ($Command -like 'sudo -u * test -f*') { 1 } else { 0 }
                 [PSCustomObject] @{ ExitStatus = $exit; Error = '' }
             }
         }
@@ -107,7 +107,7 @@ Describe 'Invoke-TarballDownload' {
         It 'throws when purge fails' {
             Mock Invoke-SshClientCommand {
                 param($SshClient, $Command)
-                $exit = if ($Command -like 'test -f*') { 1 }
+                $exit = if ($Command -like 'sudo -u * test -f*') { 1 }
                         elseif ($Command -like '*rm -f*') { 1 }
                         else { 0 }
                 [PSCustomObject] @{ ExitStatus = $exit; Error = 'permission denied' }
@@ -126,7 +126,7 @@ Describe 'Invoke-TarballDownload' {
         It 'throws when curl fails' {
             Mock Invoke-SshClientCommand {
                 param($SshClient, $Command)
-                $exit = if ($Command -like 'test -f*') { 1 }
+                $exit = if ($Command -like 'sudo -u * test -f*') { 1 }
                         elseif ($Command -like '*curl*') { 1 }
                         else { 0 }
                 [PSCustomObject] @{ ExitStatus = $exit; Error = 'network error' }

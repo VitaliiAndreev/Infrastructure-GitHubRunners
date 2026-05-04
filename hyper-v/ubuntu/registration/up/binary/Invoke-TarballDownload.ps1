@@ -60,7 +60,7 @@ function Invoke-TarballDownload {
 
     $check = Invoke-SshClientCommand `
         -SshClient $SshClient `
-        -Command   "test -f '$tarPath'" `
+        -Command   "sudo -u $RunnerUser test -f '$tarPath'" `
         -ErrorAction Stop
 
     if ($check.ExitStatus -eq 0) {
