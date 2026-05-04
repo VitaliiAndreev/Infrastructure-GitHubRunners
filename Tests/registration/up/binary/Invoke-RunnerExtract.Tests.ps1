@@ -54,7 +54,9 @@ Describe 'Invoke-RunnerExtract' {
                 -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
-                $Command -eq "sudo mkdir -p '$Script:RunnerDir' && sudo chown 'u-actions-runner:u-actions-runner' '$Script:RunnerDir'"
+                $Command -eq ("sudo mkdir -p '$Script:RunnerDir' && " +
+                              "sudo chown 'u-actions-runner:u-actions-runner' '$Script:RunnerDir' && " +
+                              "sudo chmod 700 '$Script:RunnerDir'")
             }
         }
 

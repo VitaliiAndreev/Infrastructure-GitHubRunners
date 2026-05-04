@@ -37,14 +37,14 @@ Describe 'Test-RunnerVmConnectivity' {
     Context 'reachability' {
         It 'returns a reachable target' {
             Mock Test-Connection { $true }
-            $result = @(Test-RunnerVmConnectivity -Targets @(New-Target))
+            $result = Test-RunnerVmConnectivity -Targets @(New-Target)
             $result | Should -HaveCount 1
         }
 
         It 'warns and excludes an unreachable target' {
             Mock Test-Connection { $false }
-            $result = @(Test-RunnerVmConnectivity -Targets @(New-Target) `
-                            -WarningVariable w)
+            $result = Test-RunnerVmConnectivity -Targets @(New-Target) `
+                          -WarningVariable w
             $result | Should -HaveCount 0
             $w | Should -BeLike '*ubuntu-01-ci*'
         }
@@ -61,7 +61,7 @@ Describe 'Test-RunnerVmConnectivity' {
             Mock Test-Connection { $false } -ParameterFilter { $ComputerName -eq '192.168.1.102' }
             $targets = (New-Target -RunnerName 'r1' -IpAddress '192.168.1.101'),
                        (New-Target -RunnerName 'r2' -IpAddress '192.168.1.102')
-            $result = @(Test-RunnerVmConnectivity -Targets $targets)
+            $result = Test-RunnerVmConnectivity -Targets $targets
             $result | Should -HaveCount 1
             $result[0].Entry.runnerName | Should -Be 'r1'
         }
@@ -74,7 +74,7 @@ Describe 'Test-RunnerVmConnectivity' {
         }
 
         It 'returns an empty list when targets list is empty' {
-            $result = @(Test-RunnerVmConnectivity -Targets @())
+            $result = Test-RunnerVmConnectivity -Targets @()
             $result | Should -HaveCount 0
         }
     }
