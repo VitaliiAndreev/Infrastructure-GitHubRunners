@@ -4,15 +4,20 @@
 #   inside a BeforeAll block:
 #       BeforeAll { . "$PSScriptRoot\Initialize-SshEnvironment.ps1" }
 #
-#   Provisions a minimal SSH environment in the container:
+#   Starts a Docker container (ubuntu:24.04) and provisions a minimal SSH
+#   environment inside it:
 #     - Deploy user  (infra-t-deploy): SSH-accessible, sudoers-permitted to
 #       run commands as the runner user.
 #     - Runner user  (infra-t-runner): no-login service account that owns
 #       runner files; matches the role of u-actions-runner in production.
-#   Both users are torn down by each test file's AfterAll block.
+#   Both users and the container are torn down by each test file's AfterAll
+#   block via Remove-SshEnvironment.ps1.
 #
 #   A minimal fake tarball is pre-created in /tmp so tests that need an
 #   extractable archive do not require internet access.
+#
+#   $Script:ContainerName is set here and used by Remove-SshEnvironment.ps1
+#   and by direct docker exec calls in each test file's BeforeEach/AfterEach.
 # ---------------------------------------------------------------------------
 
 function Write-Step {
@@ -21,34 +26,57 @@ function Write-Step {
     Write-Host "[$ts] Step $Number - $Description" -ForegroundColor Cyan
 }
 
-# -----------------------------------------------------------------------
-# 1. Install openssh-server and sudo
-# -----------------------------------------------------------------------
-
-Write-Step 1 'configuring apt sources'
-
-# Switching sources from http:// to https:// avoids Docker Desktop on
-# Windows silently dropping TCP connections on port 80, which otherwise
-# causes apt-get update to time out for every mirror and take ~9 minutes.
-$env:DEBIAN_FRONTEND = 'noninteractive'
-& bash -c 'sed -i "s|http://|https://|g" /etc/apt/sources.list;
-    find /etc/apt/sources.list.d -name "*.list" \
-    -exec sed -i "s|http://|https://|g" {} + 2>/dev/null; true'
-
-Write-Step 1 'apt-get update'
-& bash -c 'apt-get update -qq 2>&1' | Out-Null
-
-Write-Step 1 'apt-get install openssh-server sudo'
-$aptOutput = & bash -c 'apt-get install -y --no-install-recommends openssh-server sudo 2>&1'
-if ($LASTEXITCODE -ne 0) {
-    Write-Host 'apt-get install failed:' -ForegroundColor Red
-    $aptOutput | ForEach-Object { Write-Host $_ }
-    throw "apt-get install exited $LASTEXITCODE - cannot continue."
+# Runs a command inside the test container. Available to this script only;
+# test files use docker exec $Script:ContainerName directly.
+function Invoke-ContainerCommand {
+    param([string] $Command)
+    docker exec $Script:ContainerName bash -c $Command
 }
 
-Write-Step 1 'generating SSH host keys'
-& ssh-keygen -A 2>&1 | Out-Null
-New-Item -ItemType Directory -Path '/run/sshd' -Force | Out-Null
+# -----------------------------------------------------------------------
+# 0. Build image and start container
+#    The Dockerfile pre-installs openssh-server and sudo so the image layer
+#    is cached after the first build - subsequent runs skip all apt work.
+#    Port 2222 on the host is mapped to 22 in the container so the SSH
+#    client connects to localhost:2222 without conflicting with any host
+#    SSH daemon.
+# -----------------------------------------------------------------------
+
+$Script:ImageName     = 'infra-ssh-test-image'
+$Script:ContainerName = 'infra-ssh-test'
+
+# In CI the build-ssh-test-image action pre-builds the image before Pester
+# runs, so docker images returns a non-empty ID and we skip the build.
+# In local dev the image is absent on first run; INFRASTRUCTURE_COMMON_PATH
+# must point to the Infrastructure-Common repo so the Dockerfile can be found.
+$existingImage = docker images -q $Script:ImageName 2>&1
+if ($existingImage) {
+    Write-Step 0 'SSH test image already present - skipping build'
+} else {
+    Write-Step 0 'building SSH test image'
+    if (-not $env:INFRASTRUCTURE_COMMON_PATH) {
+        throw ('INFRASTRUCTURE_COMMON_PATH is not set. ' +
+               'Set it to the root of the Infrastructure-Common repository.')
+    }
+    $dockerfileDir = [IO.Path]::Combine(
+        $env:INFRASTRUCTURE_COMMON_PATH,
+        '.github', 'actions', 'build-ssh-test-image')
+    $buildOutput = docker build -t $Script:ImageName $dockerfileDir 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        $buildOutput | ForEach-Object { Write-Host $_ }
+        throw "Failed to build Docker image '$Script:ImageName'."
+    }
+}
+
+Write-Step 0 'starting SSH test container'
+
+# Remove any leftover container from a previous failed run.
+docker rm -f $Script:ContainerName 2>&1 | Out-Null
+
+docker run -d --name $Script:ContainerName -p 2222:22 $Script:ImageName sleep infinity
+if ($LASTEXITCODE -ne 0) {
+    throw "Failed to start Docker container '$Script:ContainerName'."
+}
 
 # -----------------------------------------------------------------------
 # 2. Create users
@@ -61,8 +89,8 @@ Write-Step 2 'creating deploy user'
 $Script:DeployUser = 'infra-t-deploy'
 $Script:DeployPass = 'InfraTestDeploy1!'
 
-& useradd -m -s /bin/bash $Script:DeployUser 2>&1 | Out-Null
-& bash -c "echo '${Script:DeployUser}:${Script:DeployPass}' | chpasswd"
+Invoke-ContainerCommand "useradd -m -s /bin/bash $Script:DeployUser"
+Invoke-ContainerCommand "echo '${Script:DeployUser}:${Script:DeployPass}' | chpasswd"
 
 Write-Step 2 'creating runner service user'
 
@@ -70,14 +98,11 @@ $Script:RunnerUser = 'infra-t-runner'
 
 # --no-create-home because the tests create the home directory structure
 # explicitly - matching how Infrastructure-Vm-Users provisions the user.
-& useradd --system --no-create-home --shell /usr/sbin/nologin $Script:RunnerUser 2>&1 |
-    Out-Null
+Invoke-ContainerCommand "useradd --system --no-create-home --shell /usr/sbin/nologin $Script:RunnerUser"
 
-# Create home directory and hand ownership to the runner user. In
-# production, useradd -m does this; here we do it explicitly so tests
-# start with a clean, predictable layout.
-New-Item -ItemType Directory -Path "/home/$($Script:RunnerUser)" -Force | Out-Null
-& chown "${Script:RunnerUser}:${Script:RunnerUser}" "/home/$($Script:RunnerUser)"
+# Create home directory and hand ownership to the runner user.
+Invoke-ContainerCommand ("mkdir -p /home/$Script:RunnerUser && " +
+    "chown ${Script:RunnerUser}:${Script:RunnerUser} /home/$Script:RunnerUser")
 
 # -----------------------------------------------------------------------
 # 3. Configure sudoers
@@ -89,15 +114,16 @@ New-Item -ItemType Directory -Path "/home/$($Script:RunnerUser)" -Force | Out-Nu
 
 Write-Step 3 'configuring sudoers'
 
-$sudoersPath = "/etc/sudoers.d/${Script:DeployUser}"
-Set-Content -Path $sudoersPath -Value @"
+$sudoersPath    = "/etc/sudoers.d/${Script:DeployUser}"
+$sudoersContent = @"
 ${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: ALL
-${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/mkdir
-${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/chown
-${Script:DeployUser} ALL=(root) NOPASSWD: /bin/rm
+${Script:DeployUser} ALL=(root) NOPASSWD: ALL
 Defaults:${Script:DeployUser} !requiretty
 "@
-& chmod 0440 $sudoersPath
+
+# Pipe via stdin (-i) so the content never appears in the process list.
+$sudoersContent | docker exec -i $Script:ContainerName `
+    bash -c "cat > $sudoersPath && chmod 0440 $sudoersPath"
 
 # -----------------------------------------------------------------------
 # 4. Configure sshd and start it
@@ -105,44 +131,49 @@ Defaults:${Script:DeployUser} !requiretty
 
 Write-Step 4 'configuring sshd'
 
-$sshdConfigPath = '/etc/ssh/sshd_config'
-$sshdConfig = Get-Content $sshdConfigPath -Raw
-if ($sshdConfig -match '(?m)^#?PasswordAuthentication') {
-    $sshdConfig = $sshdConfig -replace `
-        '(?m)^#?PasswordAuthentication\s+\w+', `
-        'PasswordAuthentication yes'
-} else {
-    $sshdConfig += "`nPasswordAuthentication yes"
-}
-Set-Content -Path $sshdConfigPath -Value $sshdConfig
+# Drop a high-priority include to ensure password auth is on regardless of
+# what the base config or cloud-init drops into sshd_config.d/.
+Invoke-ContainerCommand `
+    "mkdir -p /etc/ssh/sshd_config.d && echo 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/99-password-auth.conf"
 
 Write-Step 4 'starting sshd'
-& /usr/sbin/sshd
+Invoke-ContainerCommand '/usr/sbin/sshd'
 Start-Sleep -Seconds 1
 
 # -----------------------------------------------------------------------
 # 5. Install modules and dot-source functions
+#    These run on the host; the SSH.NET client library lives here.
 # -----------------------------------------------------------------------
 
 Write-Step 5 'installing Infrastructure.Common'
-Install-Module Infrastructure.Common -MinimumVersion '2.1.0' `
-    -Scope CurrentUser -Force -SkipPublisherCheck
+$_ic = Get-Module -ListAvailable Infrastructure.Common |
+    Where-Object { $_.Version -ge [Version]'2.2.0' } | Select-Object -First 1
+if (-not $_ic) {
+    Install-Module Infrastructure.Common -MinimumVersion '2.2.0' `
+        -Scope CurrentUser -Force -SkipPublisherCheck
+}
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
 Write-Step 5 'installing Posh-SSH (SSH.NET carrier)'
-Install-Module Posh-SSH -MinimumVersion 3.0.0 `
-    -Scope CurrentUser -Force -SkipPublisherCheck
+$_ps = Get-Module -ListAvailable Posh-SSH |
+    Where-Object { $_.Version -ge [Version]'3.0.0' } | Select-Object -First 1
+if (-not $_ps) {
+    Install-Module Posh-SSH -MinimumVersion 3.0.0 `
+        -Scope CurrentUser -Force -SkipPublisherCheck
+}
 Import-Module Posh-SSH
 
 Write-Step 5 'dot-sourcing install functions'
 $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu')
-. ([IO.Path]::Combine($src, 'registration', 'common', 'infra',       'Get-RunnerPaths.ps1'))
-. ([IO.Path]::Combine($src, 'registration', 'up',     'binary', 'Invoke-TarballDownload.ps1'))
-. ([IO.Path]::Combine($src, 'registration', 'up',     'binary', 'Invoke-RunnerExtract.ps1'))
-. ([IO.Path]::Combine($src, 'registration', 'up',     'binary', 'Invoke-RunnerInstall.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'common', 'infra',  'Get-RunnerPaths.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'up', 'binary',     'Invoke-TarballDownload.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'up', 'binary',     'Invoke-RunnerExtract.ps1'))
+. ([IO.Path]::Combine($src, 'registration', 'up', 'binary',     'Invoke-RunnerInstall.ps1'))
 
 # -----------------------------------------------------------------------
 # 6. Open SSH session
+#    Connecting to localhost:2222 which Docker maps to port 22 inside the
+#    container (see step 0).
 # -----------------------------------------------------------------------
 
 Write-Step 6 'opening SSH session'
@@ -150,7 +181,7 @@ Write-Step 6 'opening SSH session'
 $auth             = [Renci.SshNet.PasswordAuthenticationMethod]::new(
                         $Script:DeployUser, $Script:DeployPass)
 $connInfo         = [Renci.SshNet.ConnectionInfo]::new(
-                        'localhost', $Script:DeployUser, @($auth))
+                        'localhost', 2222, $Script:DeployUser, @($auth))
 $Script:SshClient = [Renci.SshNet.SshClient]::new($connInfo)
 $Script:SshClient.Connect()
 $Script:VmName    = 'test-vm'
@@ -167,9 +198,8 @@ Write-Step 7 'creating fake runner tarball'
 $Script:RunnerVersion = '2.317.0'
 $Script:FakeTarball   = "/tmp/actions-runner-linux-x64-${Script:RunnerVersion}.tar.gz"
 
-& bash -c "echo '#!/bin/bash' > /tmp/run.sh && chmod +x /tmp/run.sh && \
-    tar -czf '${Script:FakeTarball}' -C /tmp run.sh && \
-    rm /tmp/run.sh"
+Invoke-ContainerCommand ("echo '#!/bin/bash' > /tmp/run.sh && chmod +x /tmp/run.sh && " +
+    "tar -czf '${Script:FakeTarball}' -C /tmp run.sh && rm /tmp/run.sh")
 
 # -----------------------------------------------------------------------
 # 8. Define shared helpers

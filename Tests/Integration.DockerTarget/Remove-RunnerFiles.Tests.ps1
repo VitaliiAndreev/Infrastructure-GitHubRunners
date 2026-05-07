@@ -20,12 +20,12 @@ Describe 'Remove-RunnerFiles' {
     AfterEach {
         # Ensure the runner directory is absent between tests regardless of
         # whether the test itself removed it or left it.
-        & bash -c "rm -rf '$($Script:Paths.RunnerDir)'"
+        docker exec $Script:ContainerName bash -c "rm -rf '$($Script:Paths.RunnerDir)'"
     }
 
     It 'removes the runner directory when it exists' {
-        & bash -c "mkdir -p '$($Script:Paths.RunnerDir)' && \
-            chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($Script:Paths.RunnerDir)' && " +
+            "chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'")
 
         Remove-RunnerFiles `
             -SshClient  $Script:SshClient `
@@ -38,10 +38,10 @@ Describe 'Remove-RunnerFiles' {
     }
 
     It 'removes all files within the runner directory' {
-        & bash -c "mkdir -p '$($Script:Paths.RunnerDir)' && \
-            touch '$($Script:Paths.RunnerDir)/run.sh' && \
-            touch '$($Script:Paths.RunnerDir)/config.sh' && \
-            chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($Script:Paths.RunnerDir)' && " +
+            "touch '$($Script:Paths.RunnerDir)/run.sh' && " +
+            "touch '$($Script:Paths.RunnerDir)/config.sh' && " +
+            "chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'")
 
         Remove-RunnerFiles `
             -SshClient  $Script:SshClient `

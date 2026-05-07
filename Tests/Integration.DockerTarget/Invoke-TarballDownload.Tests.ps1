@@ -15,7 +15,7 @@ AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
 Describe 'Invoke-TarballDownload' {
 
     AfterEach {
-        & bash -c "rm -rf '/home/$($Script:RunnerUser)/cache'"
+        docker exec $Script:ContainerName bash -c "rm -rf '/home/$($Script:RunnerUser)/cache'"
     }
 
     BeforeEach {
@@ -25,9 +25,9 @@ Describe 'Invoke-TarballDownload' {
 
         # Pre-seed the tarball so the function hits the cache-hit branch
         # and does not attempt a real curl download.
-        & bash -c "mkdir -p '$($Script:Paths.CacheDir)' && \
-            cp '$Script:FakeTarball' '$($Script:Paths.TarPath)' && \
-            chown -R ${Script:RunnerUser}: '$($Script:Paths.CacheDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($Script:Paths.CacheDir)' && " +
+            "cp '$Script:FakeTarball' '$($Script:Paths.TarPath)' && " +
+            "chown -R ${Script:RunnerUser}: '$($Script:Paths.CacheDir)'")
     }
 
     It 'does not modify the tarball when it is already cached' {

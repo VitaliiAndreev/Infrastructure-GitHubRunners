@@ -10,7 +10,7 @@ AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
 Describe 'Invoke-RunnerExtract' {
 
     AfterEach {
-        & bash -c "rm -rf '/opt/runners/test-runner'"
+        docker exec $Script:ContainerName bash -c "rm -rf '/opt/runners/test-runner'"
     }
 
     BeforeEach {
@@ -21,9 +21,9 @@ Describe 'Invoke-RunnerExtract' {
 
         # Pre-seed the cache with the fake tarball so Invoke-RunnerExtract
         # has a valid source archive to extract from.
-        & bash -c "mkdir -p '$($Script:Paths.CacheDir)' && \
-            cp '$Script:FakeTarball' '$($Script:Paths.TarPath)' && \
-            chown -R ${Script:RunnerUser}: '$($Script:Paths.CacheDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($Script:Paths.CacheDir)' && " +
+            "cp '$Script:FakeTarball' '$($Script:Paths.TarPath)' && " +
+            "chown -R ${Script:RunnerUser}: '$($Script:Paths.CacheDir)'")
     }
 
     It 'creates the runner directory when it is absent' {
@@ -65,7 +65,9 @@ Describe 'Invoke-RunnerExtract' {
             -TarPath       $Script:Paths.TarPath
 
         # The fake tarball contains run.sh (created in Initialize-SshEnvironment.ps1).
-        $exists = Invoke-SshQuery "test -f '$($Script:Paths.RunnerDir)/run.sh' && echo yes || echo no"
+        # sudo -u is required: the runner dir is chmod 700 so only the runner
+        # user can traverse into it.
+        $exists = Invoke-SshQuery "sudo -u $Script:RunnerUser test -f '$($Script:Paths.RunnerDir)/run.sh' && echo yes || echo no"
         $exists | Should -Be 'yes'
     }
 
