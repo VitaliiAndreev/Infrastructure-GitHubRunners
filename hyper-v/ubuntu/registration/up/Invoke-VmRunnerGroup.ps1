@@ -38,7 +38,12 @@ function Invoke-VmRunnerGroup {
 
         # GitHub token - used for registration API calls only, never logged.
         [Parameter(Mandatory)]
-        [string] $Token
+        [string] $Token,
+
+        # Forwarded to Invoke-RunnerInstall. See Invoke-RunnerTarballDeploy for
+        # details.
+        [Parameter()]
+        [string] $HostBaseUrl = ''
     )
 
     # Group by runner service user so each user's tarball cache and runner
@@ -53,7 +58,8 @@ function Invoke-VmRunnerGroup {
             -SshClient     $SshClient `
             -VmName        $VmName `
             -RunnerEntries @($userGroup.Group | ForEach-Object { $_.Entry }) `
-            -RunnerVersion $RunnerVersion
+            -RunnerVersion $RunnerVersion `
+            -HostBaseUrl   $HostBaseUrl
 
         foreach ($target in $userGroup.Group) {
             $entry      = $target.Entry
