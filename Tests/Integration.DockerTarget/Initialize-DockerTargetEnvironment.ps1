@@ -154,6 +154,16 @@ if (-not $_ih) {
 }
 Import-Module Infrastructure.HyperV -Force -ErrorAction Stop
 
+Write-Step 4 'installing Infrastructure.GitHub'
+# Provides Invoke-RunnerTarballDeploy exercised by the DockerTarget tests.
+$_ig = Get-Module -ListAvailable Infrastructure.GitHub |
+    Where-Object { $_.Version -ge [Version]'0.2.0' } | Select-Object -First 1
+if (-not $_ig) {
+    Install-Module Infrastructure.GitHub -MinimumVersion '0.2.0' `
+        -Scope CurrentUser -Force -SkipPublisherCheck
+}
+Import-Module Infrastructure.GitHub -Force -ErrorAction Stop
+
 Write-Step 4 'installing Posh-SSH (SSH.NET carrier)'
 $_ps = Get-Module -ListAvailable Posh-SSH |
     Where-Object { $_.Version -ge [Version]'3.0.0' } | Select-Object -First 1
