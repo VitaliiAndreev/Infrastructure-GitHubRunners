@@ -6,7 +6,7 @@ BeforeAll {
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\down\service\Remove-RunnerService.ps1"
 
     $Script:FakeSsh    = [PSCustomObject] @{}
-    $Script:RunnerDir  = '/home/u-actions-runner/runners/runner-a'
+    $Script:RunnerDir  = '/opt/runners/runner-a'
     $Script:ServiceOk  = [PSCustomObject] @{ ExitStatus = 0; Error = '' }
 }
 

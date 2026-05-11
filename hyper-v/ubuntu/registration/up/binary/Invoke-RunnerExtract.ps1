@@ -9,7 +9,7 @@
 #   Ensures a single runner's directory exists and contains the extracted
 #   binary. Skips extraction if the directory is already present (idempotent).
 #
-#   Extract path convention: /home/{RunnerUser}/runners/{RunnerName}/
+#   Extract path convention: /opt/runners/{RunnerName}/
 #   Tarball path convention: /home/{RunnerUser}/cache/
 #     actions-runner-linux-x64-{RunnerVersion}.tar.gz
 #
@@ -58,10 +58,14 @@ function Invoke-RunnerExtract {
         return
     }
 
-    # mkdir -p on the full runner path creates the runners/ parent implicitly.
+    # /opt/runners is root-owned, so mkdir runs as root. chown transfers the
+    # leaf directory to the runner user; chmod 700 prevents other OS users
+    # from reading runner credential files (.credentials, .credentials_rsaparams).
     $mkdir = Invoke-SshClientCommand `
         -SshClient $SshClient `
-        -Command   "sudo -u $RunnerUser mkdir -p '$runnerDir'" `
+        -Command   ("sudo mkdir -p '$runnerDir' && " +
+                    "sudo chown '${RunnerUser}:${RunnerUser}' '$runnerDir' && " +
+                    "sudo chmod 700 '$runnerDir'") `
         -ErrorAction Stop
 
     if ($mkdir.ExitStatus -ne 0) {

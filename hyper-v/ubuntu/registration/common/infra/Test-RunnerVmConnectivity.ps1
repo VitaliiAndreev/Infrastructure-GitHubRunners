@@ -6,9 +6,15 @@
 
 # ---------------------------------------------------------------------------
 # Test-RunnerVmConnectivity
-#   Pings each target VM. Returns a list containing only the reachable ones.
-#   Unreachable VMs are warned and skipped rather than aborting the run, so
-#   a single offline VM does not block all others.
+#   Probes SSH on each target VM via Test-VmSshPort (Infrastructure.HyperV)
+#   and returns a list of the reachable ones. Unreachable VMs are warned
+#   and skipped rather than aborting the run, so a single offline VM does
+#   not block all others.
+#
+#   Test-VmSshPort is preferred over Test-Connection because we follow this
+#   check with an SSH session - a successful TCP-22 connect is a strict
+#   superset of an ICMP "host up" reply and eliminates the post-reboot race
+#   where ICMP succeeds before sshd binds.
 # ---------------------------------------------------------------------------
 
 function Test-RunnerVmConnectivity {
@@ -23,18 +29,18 @@ function Test-RunnerVmConnectivity {
         $name = $t.Entry.runnerName
         $ip   = $t.Entry.ipAddress
 
-        Write-Host "[$name] Pinging ..." -ForegroundColor Cyan
+        Write-Host "[$name] Probing SSH ..." -ForegroundColor Cyan
 
-        if (Test-Connection -ComputerName $ip -Count 1 -Quiet) {
-            Write-Host "[$name] Reachable." -ForegroundColor Green
+        if (Test-VmSshPort -IpAddress $ip) {
+            Write-Host "[$name] SSH reachable." -ForegroundColor Green
             $reachable.Add($t)
         }
         else {
-            Write-Warning "[$name] Unreachable - skipping."
+            Write-Warning "[$name] SSH unreachable - skipping."
         }
     }
 
     Write-Host ("$($reachable.Count) of $($Targets.Count) runner " +
         "target(s) reachable.") -ForegroundColor Cyan
-    $reachable.ToArray()
+    return , $reachable.ToArray()
 }

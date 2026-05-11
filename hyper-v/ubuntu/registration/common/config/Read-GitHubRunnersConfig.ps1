@@ -21,9 +21,9 @@ function Read-GitHubRunnersConfig {
     $json    = Get-InfrastructureSecret `
                    -VaultName  'GitHubRunners' `
                    -SecretName 'GitHubRunnersConfig'
-    $entries = @(ConvertFrom-GitHubRunnersConfigJson -Json $json)
+    $entries = ConvertTo-Array (ConvertFrom-GitHubRunnersConfigJson -Json $json)
 
     Write-Host "OK - $($entries.Count) runner entry/entries in GitHubRunnersConfig." `
         -ForegroundColor Green
-    $entries
+    ConvertTo-Array $entries
 }

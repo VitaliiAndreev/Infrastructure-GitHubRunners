@@ -27,7 +27,7 @@ PowerShell 7+ (`pwsh`).
 ## Prerequisites
 
 - Windows host with Hyper-V and PowerShell 7+.
-- `Infrastructure.Common` >= `2.0.0` installed from PSGallery.
+- `Infrastructure.Common` >= `3.1.0` installed from PSGallery.
 - VMs provisioned by **Infrastructure-Vm-Provisioner** and reachable.
 - A deploy user and a runner service user created on each VM by
   **Infrastructure-Vm-Users** before running this script (named in the
@@ -142,8 +142,8 @@ Re-running `register-runners.ps1` is safe:
 
 - The runner tarball is downloaded once per version and cached at
   `/home/{runnerUsername}/cache/`. Subsequent runs skip the download.
-- Runner directories (`/home/{runnerUsername}/runners/{runnerName}/`) are
-  only extracted if absent.
+- Runner directories (`/opt/runners/{runnerName}/`) are only extracted if
+  absent.
 - Runners already registered on GitHub with an active systemd service are
   detected and skipped.
 - Runners registered but with a stopped service are restarted without

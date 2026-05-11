@@ -1,16 +1,16 @@
 # Integration tests for Invoke-RunnerExtract against a real SSH session.
-# See Initialize-SshEnvironment.ps1 for environment details and isolation notes.
+# See Initialize-DockerTargetEnvironment.ps1 for environment details and isolation notes.
 
 BeforeAll {
-    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
+    . "$PSScriptRoot\Initialize-DockerTargetEnvironment.ps1"
 }
 
-AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
+AfterAll { . "$PSScriptRoot\Remove-DockerTargetEnvironment.ps1" }
 
 Describe 'Invoke-RunnerExtract' {
 
     AfterEach {
-        & bash -c "rm -rf '/home/$($Script:RunnerUser)/runners'"
+        docker exec $Script:ContainerName bash -c "rm -rf '/opt/runners/test-runner'"
     }
 
     BeforeEach {
@@ -21,9 +21,9 @@ Describe 'Invoke-RunnerExtract' {
 
         # Pre-seed the cache with the fake tarball so Invoke-RunnerExtract
         # has a valid source archive to extract from.
-        & bash -c "mkdir -p '$($Script:Paths.CacheDir)' && \
-            cp '$Script:FakeTarball' '$($Script:Paths.TarPath)' && \
-            chown -R ${Script:RunnerUser}: '$($Script:Paths.CacheDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($Script:Paths.CacheDir)' && " +
+            "cp '$Script:FakeTarball' '$($Script:Paths.TarPath)' && " +
+            "chown -R ${Script:RunnerUser}: '$($Script:Paths.CacheDir)'")
     }
 
     It 'creates the runner directory when it is absent' {
@@ -64,8 +64,10 @@ Describe 'Invoke-RunnerExtract' {
             -RunnerDir     $Script:Paths.RunnerDir `
             -TarPath       $Script:Paths.TarPath
 
-        # The fake tarball contains run.sh (created in Initialize-SshEnvironment.ps1).
-        $exists = Invoke-SshQuery "test -f '$($Script:Paths.RunnerDir)/run.sh' && echo yes || echo no"
+        # The fake tarball contains run.sh (created in Initialize-DockerTargetEnvironment.ps1).
+        # sudo -u is required: the runner dir is chmod 700 so only the runner
+        # user can traverse into it.
+        $exists = Invoke-SshQuery "sudo -u $Script:RunnerUser test -f '$($Script:Paths.RunnerDir)/run.sh' && echo yes || echo no"
         $exists | Should -Be 'yes'
     }
 

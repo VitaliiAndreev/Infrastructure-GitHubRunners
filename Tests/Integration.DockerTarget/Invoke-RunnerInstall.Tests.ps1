@@ -1,29 +1,29 @@
 # Integration tests for Invoke-RunnerInstall against a real SSH session.
-# See Initialize-SshEnvironment.ps1 for environment details and isolation notes.
+# See Initialize-DockerTargetEnvironment.ps1 for environment details and isolation notes.
 #
 # Invoke-RunnerInstall orchestrates TarballDownload + RunnerExtract. Tests
 # here verify end-to-end filesystem state rather than re-testing each
 # function's internal behavior.
 
 BeforeAll {
-    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
+    . "$PSScriptRoot\Initialize-DockerTargetEnvironment.ps1"
 }
 
-AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
+AfterAll { . "$PSScriptRoot\Remove-DockerTargetEnvironment.ps1" }
 
 Describe 'Invoke-RunnerInstall' {
 
     AfterEach {
-        & bash -c "rm -rf '/home/$($Script:RunnerUser)/cache' '/home/$($Script:RunnerUser)/runners'"
+        docker exec $Script:ContainerName bash -c "rm -rf '/home/$($Script:RunnerUser)/cache' '/opt/runners'"
     }
 
     BeforeEach {
         # Pre-seed the fake tarball in the cache so TarballDownload hits the
         # cache-hit branch and does not attempt a real curl download.
         $cachePaths = Get-RunnerPaths -RunnerUser $Script:RunnerUser -RunnerVersion $Script:RunnerVersion
-        & bash -c "mkdir -p '$($cachePaths.CacheDir)' && \
-            cp '$Script:FakeTarball' '$($cachePaths.TarPath)' && \
-            chown -R ${Script:RunnerUser}: '$($cachePaths.CacheDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($cachePaths.CacheDir)' && " +
+            "cp '$Script:FakeTarball' '$($cachePaths.TarPath)' && " +
+            "chown -R ${Script:RunnerUser}: '$($cachePaths.CacheDir)'")
     }
 
     It 'creates the runner directory for a single entry' {

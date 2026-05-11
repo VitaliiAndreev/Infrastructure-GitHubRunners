@@ -6,7 +6,7 @@ BeforeAll {
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\up\binary\Invoke-RunnerExtract.ps1"
 
     $Script:FakeSsh   = [PSCustomObject] @{}
-    $Script:RunnerDir = '/home/u-actions-runner/runners/runner-a'
+    $Script:RunnerDir = '/opt/runners/runner-a'
     $Script:TarPath   = '/home/u-actions-runner/cache/actions-runner-linux-x64-2.317.0.tar.gz'
 }
 
@@ -43,7 +43,7 @@ Describe 'Invoke-RunnerExtract' {
             }
         }
 
-        It 'creates the runner directory as the runner user' {
+        It 'creates the runner directory as root and transfers ownership to the runner user' {
             Invoke-RunnerExtract `
                 -SshClient     $Script:FakeSsh `
                 -VmName        'vm-01' `
@@ -54,7 +54,9 @@ Describe 'Invoke-RunnerExtract' {
                 -TarPath       $Script:TarPath
 
             Should -Invoke Invoke-SshClientCommand -Times 1 -ParameterFilter {
-                $Command -like "sudo -u u-actions-runner mkdir -p '$Script:RunnerDir'"
+                $Command -eq ("sudo mkdir -p '$Script:RunnerDir' && " +
+                              "sudo chown 'u-actions-runner:u-actions-runner' '$Script:RunnerDir' && " +
+                              "sudo chmod 700 '$Script:RunnerDir'")
             }
         }
 

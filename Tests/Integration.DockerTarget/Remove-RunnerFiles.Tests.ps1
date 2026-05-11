@@ -1,8 +1,8 @@
 # Integration tests for Remove-RunnerFiles against a real SSH session.
-# See Initialize-SshEnvironment.ps1 for environment details and isolation notes.
+# See Initialize-DockerTargetEnvironment.ps1 for environment details and isolation notes.
 
 BeforeAll {
-    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
+    . "$PSScriptRoot\Initialize-DockerTargetEnvironment.ps1"
 
     $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu')
     . ([IO.Path]::Combine($src, 'registration', 'down', 'binary', 'Remove-RunnerFiles.ps1'))
@@ -13,19 +13,19 @@ BeforeAll {
         -RunnerName 'test-runner'
 }
 
-AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
+AfterAll { . "$PSScriptRoot\Remove-DockerTargetEnvironment.ps1" }
 
 Describe 'Remove-RunnerFiles' {
 
     AfterEach {
         # Ensure the runner directory is absent between tests regardless of
         # whether the test itself removed it or left it.
-        & bash -c "rm -rf '$($Script:Paths.RunnerDir)'"
+        docker exec $Script:ContainerName bash -c "rm -rf '$($Script:Paths.RunnerDir)'"
     }
 
     It 'removes the runner directory when it exists' {
-        & bash -c "mkdir -p '$($Script:Paths.RunnerDir)' && \
-            chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($Script:Paths.RunnerDir)' && " +
+            "chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'")
 
         Remove-RunnerFiles `
             -SshClient  $Script:SshClient `
@@ -38,10 +38,10 @@ Describe 'Remove-RunnerFiles' {
     }
 
     It 'removes all files within the runner directory' {
-        & bash -c "mkdir -p '$($Script:Paths.RunnerDir)' && \
-            touch '$($Script:Paths.RunnerDir)/run.sh' && \
-            touch '$($Script:Paths.RunnerDir)/config.sh' && \
-            chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'"
+        docker exec $Script:ContainerName bash -c ("mkdir -p '$($Script:Paths.RunnerDir)' && " +
+            "touch '$($Script:Paths.RunnerDir)/run.sh' && " +
+            "touch '$($Script:Paths.RunnerDir)/config.sh' && " +
+            "chown -R ${Script:RunnerUser}: '$($Script:Paths.RunnerDir)'")
 
         Remove-RunnerFiles `
             -SshClient  $Script:SshClient `

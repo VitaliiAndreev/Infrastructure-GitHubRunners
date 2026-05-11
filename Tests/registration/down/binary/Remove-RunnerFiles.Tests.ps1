@@ -4,7 +4,7 @@ BeforeAll {
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\down\binary\Remove-RunnerFiles.ps1"
 
     $Script:FakeSsh   = [PSCustomObject] @{}
-    $Script:RunnerDir = '/home/u-actions-runner/runners/runner-a'
+    $Script:RunnerDir = '/opt/runners/runner-a'
 }
 
 Describe 'Remove-RunnerFiles' {

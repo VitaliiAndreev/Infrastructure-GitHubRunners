@@ -19,27 +19,24 @@
 #>
 
 [CmdletBinding()]
-param()
+param(
+    # GitHub token. When provided, skips the interactive Read-GitHubPat
+    # prompt - required for unattended callers such as the E2E agent.
+    [Parameter()]
+    [string] $Token = ''
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Bootstrap Infrastructure.Common, which provides Invoke-ModuleInstall used
-# for all subsequent module installs. This inline block is the only install
-# logic that cannot be abstracted - you cannot call a function from a module
-# that hasn't been installed yet.
-Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
-    -Scope CurrentUser -Force -ForceBootstrap | Out-Null
-$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
-    Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'2.0.1') {
-    Install-Module Infrastructure.Common -Scope CurrentUser -Force
-}
-Import-Module Infrastructure.Common -Force -ErrorAction Stop
+# Install / import every required PowerShell module. The helper owns the
+# dependency list for this repo so each entry-point script does not repeat
+# the bootstrap block.
+. "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
-# Dot-source helpers after Infrastructure.Common is loaded so
-# Assert-RequiredProperties and Invoke-GitHubApi are available inside their
-# function bodies.
+# Dot-source helpers after the modules are loaded so Assert-RequiredProperties,
+# Invoke-GitHubApi, and the SSH helpers are available inside their function
+# bodies.
 . "$PSScriptRoot\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1"
 . "$PSScriptRoot\registration\common\config\Join-RunnerDeployCredentials.ps1"
 . "$PSScriptRoot\registration\common\config\Read-GitHubPat.ps1"
@@ -52,24 +49,10 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 . "$PSScriptRoot\registration\common\service\Test-RunnerServiceActive.ps1"
 . "$PSScriptRoot\registration\up\binary\Invoke-RunnerExtract.ps1"
 . "$PSScriptRoot\registration\up\binary\Invoke-RunnerInstall.ps1"
-. "$PSScriptRoot\registration\up\binary\Invoke-TarballDownload.ps1"
 . "$PSScriptRoot\registration\up\github\Resolve-RunnerVersion.ps1"
 . "$PSScriptRoot\registration\up\registration\Invoke-RunnerRegistration.ps1"
 . "$PSScriptRoot\registration\up\service\Start-RunnerService.ps1"
 . "$PSScriptRoot\registration\up\Invoke-VmRunnerGroup.ps1"
-
-# Infrastructure.Secrets provides Get-InfrastructureSecret and
-# Use-MicrosoftPowerShellSecretStoreProvider used below.
-Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '3.0.0'
-
-# Posh-SSH is installed here solely to obtain its bundled Renci.SshNet.dll.
-# Posh-SSH's own cmdlets (New-SSHSession, Invoke-SSHCommand) are NOT used
-# because ConnectionInfoGenerator in Posh-SSH 3.x has a bug that drops
-# algorithm entries from the SSH.NET ConnectionInfo, causing "Key exchange
-# negotiation failed" against OpenSSH 9.x (Ubuntu 24.04). SSH.NET is used
-# directly instead via Invoke-SshClientCommand (Infrastructure.Common) and
-# the connection block in the reconciliation loop below.
-Invoke-ModuleInstall -ModuleName 'Posh-SSH'
 
 # ---------------------------------------------------------------------------
 # Register the SecretStore provider for all vault reads in this session.
@@ -88,7 +71,9 @@ Use-MicrosoftPowerShellSecretStoreProvider
 #    Required scope: 'repo' for private repos, 'public_repo' for public.
 # ---------------------------------------------------------------------------
 
-$token = Read-GitHubPat
+if (-not $Token) {
+    $Token = Read-GitHubPat
+}
 
 # ---------------------------------------------------------------------------
 # Read configs from vaults
@@ -104,15 +89,15 @@ $deployPasswords = Read-VmDeployPasswords
 #    Infrastructure-Vm-Users.
 # ---------------------------------------------------------------------------
 
-$targets = @(Join-RunnerDeployCredentials `
+$targets = Join-RunnerDeployCredentials `
     -RunnerEntries   $runnerEntries `
-    -DeployPasswords $deployPasswords)
+    -DeployPasswords $deployPasswords
 
 # ---------------------------------------------------------------------------
 # Ping each matched VM
 # ---------------------------------------------------------------------------
 
-$reachable = @(Test-RunnerVmConnectivity -Targets $targets)
+$reachable = Test-RunnerVmConnectivity -Targets $targets
 
 # ---------------------------------------------------------------------------
 # Resolve the latest runner version once - all VMs receive the same binary.
@@ -121,7 +106,23 @@ $reachable = @(Test-RunnerVmConnectivity -Targets $targets)
 $runnerVersion = Resolve-RunnerVersion -Token $token
 
 # ---------------------------------------------------------------------------
+# Prefetch the runner tarball to the Windows host cache
+#   The tarball is later served to each VM by the host file server, bypassing
+#   the Hyper-V NAT bottleneck (~116 KB/s for in-VM curl from GitHub).
+# ---------------------------------------------------------------------------
+
+$_tarLocalPath = Invoke-RunnerTarballEnsure `
+    -RunnerVersion $runnerVersion `
+    -CacheDir      (Join-Path $env:TEMP 'runner-cache')
+
+# ---------------------------------------------------------------------------
 # Install runner binary and register each runner via SSH
+#   The file server runs for the duration of all VM installs and is stopped
+#   in a finally block by Invoke-WithVmFileServer regardless of errors.
+#
+#   The host IP is derived from the first reachable VM's ipAddress - all VMs
+#   are on the same Hyper-V internal switch so any of them works.
+#
 #   Group reachable entries by VM so one SSH connection handles all runners
 #   on a host. Open the connection as the deploy user - admin credentials
 #   are not used or stored in this repo (see plan.md prerequisites).
@@ -134,43 +135,52 @@ $runnerVersion = Resolve-RunnerVersion -Token $token
 #   comment above for why.
 # ---------------------------------------------------------------------------
 
-$vmGroups = $reachable | Group-Object { $_.Entry.vmName }
+$_hostVmIp = ($reachable | Select-Object -First 1).Entry.ipAddress
+$vmGroups  = $reachable | Group-Object { $_.Entry.vmName }
 
-foreach ($group in $vmGroups) {
-    $first     = $group.Group[0]
-    $vmName    = $first.Entry.vmName
-    $ipAddress = $first.Entry.ipAddress
-    $username  = $first.Entry.deployUsername
-    # Plain string - see resolve\Read-VmDeployPasswords.ps1 for rationale.
-    $password  = $first.Password
+Invoke-WithVmFileServer -VmIpAddress $_hostVmIp -Port 8745 -ScriptBlock {
+    param($server)
 
-    Write-Host ""
-    Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
+    # Stage the pre-fetched tarball once; all VMs download from the same URL.
+    $null = Add-VmFileServerFile -Server $server -LocalPath $_tarLocalPath
 
-    $sshClient = $null
+    foreach ($group in $vmGroups) {
+        $first     = $group.Group[0]
+        $vmName    = $first.Entry.vmName
+        $ipAddress = $first.Entry.ipAddress
+        $username  = $first.Entry.deployUsername
+        # Plain string - see resolve\Read-VmDeployPasswords.ps1 for rationale.
+        $password  = $first.Password
 
-    try {
-        $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
-                         $username, $password)
-        $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
-                         $ipAddress, $username, @($auth))
-        $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
-        $sshClient.Connect()
+        Write-Host ""
+        Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
 
-        Invoke-VmRunnerGroup `
-            -SshClient     $sshClient `
-            -VmName        $vmName `
-            -Targets       $group.Group `
-            -RunnerVersion $runnerVersion `
-            -Token         $token
-    }
-    catch [Renci.SshNet.Common.SshConnectionException] {
-        Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
-    }
-    finally {
-        if ($null -ne $sshClient) {
-            if ($sshClient.IsConnected) { $sshClient.Disconnect() }
-            $sshClient.Dispose()
+        $sshClient = $null
+
+        try {
+            $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
+                             $username, $password)
+            $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
+                             $ipAddress, $username, @($auth))
+            $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
+            $sshClient.Connect()
+
+            Invoke-VmRunnerGroup `
+                -SshClient     $sshClient `
+                -VmName        $vmName `
+                -Targets       $group.Group `
+                -RunnerVersion $runnerVersion `
+                -Token         $token `
+                -HostBaseUrl   $server.BaseUrl
+        }
+        catch [Renci.SshNet.Common.SshConnectionException] {
+            Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
+        }
+        finally {
+            if ($null -ne $sshClient) {
+                if ($sshClient.IsConnected) { $sshClient.Disconnect() }
+                $sshClient.Dispose()
+            }
         }
     }
 }

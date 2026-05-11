@@ -42,5 +42,5 @@ function Join-RunnerDeployCredentials {
 
     Write-Host ("Matched $($result.Count) of $($RunnerEntries.Count) " +
         "runner entry/entries to deploy credentials.") -ForegroundColor Cyan
-    $result.ToArray()
+    return , $result.ToArray()
 }

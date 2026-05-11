@@ -1,6 +1,9 @@
 BeforeAll {
-    function Get-InfrastructureSecret         { param($VaultName, $SecretName) }
+    # Stub Infrastructure.* and helper functions the SUT depends on, so the
+    # unit test stays unit-scoped (no Import-Module Infrastructure.Common).
+    function Get-InfrastructureSecret            { param($VaultName, $SecretName) }
     function ConvertFrom-GitHubRunnersConfigJson { param($Json) }
+    function ConvertTo-Array                     { param($Value) ,@($Value) }
 
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\config\Read-GitHubRunnersConfig.ps1"
 }

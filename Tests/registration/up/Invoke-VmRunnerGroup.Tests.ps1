@@ -5,7 +5,7 @@ BeforeAll {
                             RunnerDir = "/runners/$RunnerName" } }
     function Get-RunnerServiceName           { param($SshClient, $RunnerName) }
     function Invoke-GitHubApi                { param($Token, $Endpoint, $Uri, $Method) }
-    function Invoke-RunnerInstall            { param($SshClient, $VmName, $RunnerEntries, $RunnerVersion) }
+    function Invoke-RunnerInstall            { param($SshClient, $VmName, $RunnerEntries, $RunnerVersion, $HostBaseUrl) }
     function Invoke-RunnerRegistration       { param($SshClient, $VmName, $RunnerUser, $Entry,
                                                      $Token, $RunnerDir, [switch] $SkipConfig) }
     function Start-RunnerService             { param($SshClient, $VmName, $RunnerName) }
@@ -30,6 +30,26 @@ BeforeAll {
 }
 
 Describe 'Invoke-VmRunnerGroup' {
+
+    Context 'host base URL forwarding' {
+        It 'forwards HostBaseUrl to Invoke-RunnerInstall' {
+            Mock Invoke-RunnerInstall         {}
+            Mock Get-GitHubRunnerRegistration { [PSCustomObject] @{ id = 1 } }
+            Mock Test-RunnerServiceActive     { $true }
+
+            Invoke-VmRunnerGroup `
+                -SshClient     $Script:FakeSsh `
+                -VmName        'vm-01' `
+                -Targets       @(New-Target 'runner-a') `
+                -RunnerVersion '2.317.0' `
+                -Token         'token' `
+                -HostBaseUrl   'http://10.10.0.1:8745'
+
+            Should -Invoke Invoke-RunnerInstall -Times 1 -ParameterFilter {
+                $HostBaseUrl -eq 'http://10.10.0.1:8745'
+            }
+        }
+    }
 
     Context 'healthy runner' {
         It 'skips install and registration when runner is registered and service is active' {
