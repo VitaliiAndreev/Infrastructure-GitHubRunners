@@ -1,15 +1,15 @@
 # Integration tests for Invoke-RunnerInstall against a real SSH session.
-# See Initialize-SshEnvironment.ps1 for environment details and isolation notes.
+# See Initialize-DockerTargetEnvironment.ps1 for environment details and isolation notes.
 #
 # Invoke-RunnerInstall orchestrates TarballDownload + RunnerExtract. Tests
 # here verify end-to-end filesystem state rather than re-testing each
 # function's internal behavior.
 
 BeforeAll {
-    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
+    . "$PSScriptRoot\Initialize-DockerTargetEnvironment.ps1"
 }
 
-AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
+AfterAll { . "$PSScriptRoot\Remove-DockerTargetEnvironment.ps1" }
 
 Describe 'Invoke-RunnerInstall' {
 

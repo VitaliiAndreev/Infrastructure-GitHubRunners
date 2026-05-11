@@ -1,8 +1,8 @@
 # Integration tests for Remove-RunnerFiles against a real SSH session.
-# See Initialize-SshEnvironment.ps1 for environment details and isolation notes.
+# See Initialize-DockerTargetEnvironment.ps1 for environment details and isolation notes.
 
 BeforeAll {
-    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
+    . "$PSScriptRoot\Initialize-DockerTargetEnvironment.ps1"
 
     $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu')
     . ([IO.Path]::Combine($src, 'registration', 'down', 'binary', 'Remove-RunnerFiles.ps1'))
@@ -13,7 +13,7 @@ BeforeAll {
         -RunnerName 'test-runner'
 }
 
-AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
+AfterAll { . "$PSScriptRoot\Remove-DockerTargetEnvironment.ps1" }
 
 Describe 'Remove-RunnerFiles' {
 

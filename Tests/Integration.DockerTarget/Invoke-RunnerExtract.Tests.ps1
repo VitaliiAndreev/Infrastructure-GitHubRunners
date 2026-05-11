@@ -1,11 +1,11 @@
 # Integration tests for Invoke-RunnerExtract against a real SSH session.
-# See Initialize-SshEnvironment.ps1 for environment details and isolation notes.
+# See Initialize-DockerTargetEnvironment.ps1 for environment details and isolation notes.
 
 BeforeAll {
-    . "$PSScriptRoot\Initialize-SshEnvironment.ps1"
+    . "$PSScriptRoot\Initialize-DockerTargetEnvironment.ps1"
 }
 
-AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
+AfterAll { . "$PSScriptRoot\Remove-DockerTargetEnvironment.ps1" }
 
 Describe 'Invoke-RunnerExtract' {
 
@@ -64,7 +64,7 @@ Describe 'Invoke-RunnerExtract' {
             -RunnerDir     $Script:Paths.RunnerDir `
             -TarPath       $Script:Paths.TarPath
 
-        # The fake tarball contains run.sh (created in Initialize-SshEnvironment.ps1).
+        # The fake tarball contains run.sh (created in Initialize-DockerTargetEnvironment.ps1).
         # sudo -u is required: the runner dir is chmod 700 so only the runner
         # user can traverse into it.
         $exists = Invoke-SshQuery "sudo -u $Script:RunnerUser test -f '$($Script:Paths.RunnerDir)/run.sh' && echo yes || echo no"

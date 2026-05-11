@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
-# Remove-SshEnvironment.ps1
-#   Shared AfterAll body for integration tests. Dot-source this file
-#   inside an AfterAll block:
-#       AfterAll { . "$PSScriptRoot\Remove-SshEnvironment.ps1" }
+# Remove-DockerTargetEnvironment.ps1
+#   Shared AfterAll body for DockerTarget integration tests. Dot-source this
+#   file inside an AfterAll block:
+#       AfterAll { . "$PSScriptRoot\Remove-DockerTargetEnvironment.ps1" }
 # ---------------------------------------------------------------------------
 
 if ($null -ne $Script:SshClient) {

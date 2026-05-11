@@ -1,8 +1,8 @@
 # ---------------------------------------------------------------------------
-# Initialize-SshEnvironment.ps1
-#   Shared BeforeAll body for install-path integration tests. Dot-source
+# Initialize-DockerTargetEnvironment.ps1
+#   Shared BeforeAll body for DockerTarget integration tests. Dot-source
 #   inside a BeforeAll block:
-#       BeforeAll { . "$PSScriptRoot\Initialize-SshEnvironment.ps1" }
+#       BeforeAll { . "$PSScriptRoot\Initialize-DockerTargetEnvironment.ps1" }
 #
 #   Starts a Docker container (ubuntu:24.04) and provisions a minimal SSH
 #   environment inside it:
@@ -11,13 +11,14 @@
 #     - Runner user  (infra-t-runner): no-login service account that owns
 #       runner files; matches the role of u-actions-runner in production.
 #   Both users and the container are torn down by each test file's AfterAll
-#   block via Remove-SshEnvironment.ps1.
+#   block via Remove-DockerTargetEnvironment.ps1.
 #
 #   A minimal fake tarball is pre-created in /tmp so tests that need an
 #   extractable archive do not require internet access.
 #
-#   $Script:ContainerName is set here and used by Remove-SshEnvironment.ps1
-#   and by direct docker exec calls in each test file's BeforeEach/AfterEach.
+#   $Script:ContainerName is set here and used by
+#   Remove-DockerTargetEnvironment.ps1 and by direct docker exec calls in
+#   each test file's BeforeEach/AfterEach.
 # ---------------------------------------------------------------------------
 
 function Write-Step {
@@ -126,35 +127,34 @@ $sudoersContent | docker exec -i $Script:ContainerName `
     bash -c "cat > $sudoersPath && chmod 0440 $sudoersPath"
 
 # -----------------------------------------------------------------------
-# 4. Configure sshd and start it
+# 4. Install host-side modules
+#    Done before starting sshd because Wait-VmSshReady (HyperV) is used in
+#    step 5 to gate sshd's port-22 bind inside the container. Posh-SSH is
+#    installed in the same step because the host opens its own SshClient
+#    against the container in step 6.
 # -----------------------------------------------------------------------
 
-Write-Step 4 'configuring sshd'
-
-# Drop a high-priority include to ensure password auth is on regardless of
-# what the base config or cloud-init drops into sshd_config.d/.
-Invoke-ContainerCommand `
-    "mkdir -p /etc/ssh/sshd_config.d && echo 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/99-password-auth.conf"
-
-Write-Step 4 'starting sshd'
-Invoke-ContainerCommand '/usr/sbin/sshd'
-Start-Sleep -Seconds 1
-
-# -----------------------------------------------------------------------
-# 5. Install modules and dot-source functions
-#    These run on the host; the SSH.NET client library lives here.
-# -----------------------------------------------------------------------
-
-Write-Step 5 'installing Infrastructure.Common'
+Write-Step 4 'installing Infrastructure.Common'
 $_ic = Get-Module -ListAvailable Infrastructure.Common |
-    Where-Object { $_.Version -ge [Version]'2.2.0' } | Select-Object -First 1
+    Where-Object { $_.Version -ge [Version]'4.0.0' } | Select-Object -First 1
 if (-not $_ic) {
-    Install-Module Infrastructure.Common -MinimumVersion '2.2.0' `
+    Install-Module Infrastructure.Common -MinimumVersion '4.0.0' `
         -Scope CurrentUser -Force -SkipPublisherCheck
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
 
-Write-Step 5 'installing Posh-SSH (SSH.NET carrier)'
+Write-Step 4 'installing Infrastructure.HyperV'
+# Provides Invoke-SshClientCommand used by Invoke-SshQuery below, plus
+# Wait-VmSshReady used to gate sshd startup in step 5.
+$_ih = Get-Module -ListAvailable Infrastructure.HyperV |
+    Where-Object { $_.Version -ge [Version]'0.2.0' } | Select-Object -First 1
+if (-not $_ih) {
+    Install-Module Infrastructure.HyperV -MinimumVersion '0.2.0' `
+        -Scope CurrentUser -Force -SkipPublisherCheck
+}
+Import-Module Infrastructure.HyperV -Force -ErrorAction Stop
+
+Write-Step 4 'installing Posh-SSH (SSH.NET carrier)'
 $_ps = Get-Module -ListAvailable Posh-SSH |
     Where-Object { $_.Version -ge [Version]'3.0.0' } | Select-Object -First 1
 if (-not $_ps) {
@@ -163,10 +163,30 @@ if (-not $_ps) {
 }
 Import-Module Posh-SSH
 
+# -----------------------------------------------------------------------
+# 5. Configure sshd and start it
+# -----------------------------------------------------------------------
+
+Write-Step 5 'configuring sshd'
+
+# Drop a high-priority include to ensure password auth is on regardless of
+# what the base config or cloud-init drops into sshd_config.d/.
+Invoke-ContainerCommand `
+    "mkdir -p /etc/ssh/sshd_config.d && echo 'PasswordAuthentication yes' > /etc/ssh/sshd_config.d/99-password-auth.conf"
+
+Write-Step 5 'starting sshd'
+Invoke-ContainerCommand '/usr/sbin/sshd'
+# Wait for sshd inside the container to bind port 22 (mapped to 2222 on
+# the host). The previous fixed Start-Sleep -Seconds 1 was a guess; on a
+# slow host it could race the subsequent SSH connect attempt.
+if (-not (Wait-VmSshReady -IpAddress 'localhost' -Port 2222 `
+                          -TimeoutSeconds 10 -PollIntervalSeconds 1)) {
+    throw "sshd did not become reachable on localhost:2222 within 10s."
+}
+
 Write-Step 5 'dot-sourcing install functions'
 $src = [IO.Path]::Combine($PSScriptRoot, '..', '..', 'hyper-v', 'ubuntu')
 . ([IO.Path]::Combine($src, 'registration', 'common', 'infra',  'Get-RunnerPaths.ps1'))
-. ([IO.Path]::Combine($src, 'registration', 'up', 'binary',     'Invoke-TarballDownload.ps1'))
 . ([IO.Path]::Combine($src, 'registration', 'up', 'binary',     'Invoke-RunnerExtract.ps1'))
 . ([IO.Path]::Combine($src, 'registration', 'up', 'binary',     'Invoke-RunnerInstall.ps1'))
 
