@@ -29,26 +29,14 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
-# Bootstrap Infrastructure.Common, which provides Invoke-ModuleInstall used
-# for all subsequent module installs. This inline block is the only install
-# logic that cannot be abstracted - you cannot call a function from a module
-# that hasn't been installed yet.
-$_nuget = Get-PackageProvider -Name NuGet -ListAvailable -ErrorAction SilentlyContinue |
-    Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
-    Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 `
-        -Scope CurrentUser -Force -ForceBootstrap | Out-Null
-}
-$_common = Get-Module -ListAvailable -Name Infrastructure.Common |
-    Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'2.1.0') {
-    Install-Module Infrastructure.Common -Scope CurrentUser -Force
-}
-Import-Module Infrastructure.Common -Force -ErrorAction Stop
+# Install / import every required PowerShell module. The helper owns the
+# dependency list for this repo so each entry-point script does not repeat
+# the bootstrap block.
+. "$PSScriptRoot\Install-ModuleDependencies.ps1"
 
-# Dot-source helpers after Infrastructure.Common is loaded so
-# Assert-RequiredProperties and Invoke-GitHubApi are available inside their
-# function bodies.
+# Dot-source helpers after the modules are loaded so Assert-RequiredProperties,
+# Invoke-GitHubApi, and the SSH helpers are available inside their function
+# bodies.
 . "$PSScriptRoot\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1"
 . "$PSScriptRoot\registration\common\config\Join-RunnerDeployCredentials.ps1"
 . "$PSScriptRoot\registration\common\config\Read-GitHubPat.ps1"
@@ -66,19 +54,6 @@ Import-Module Infrastructure.Common -Force -ErrorAction Stop
 . "$PSScriptRoot\registration\up\registration\Invoke-RunnerRegistration.ps1"
 . "$PSScriptRoot\registration\up\service\Start-RunnerService.ps1"
 . "$PSScriptRoot\registration\up\Invoke-VmRunnerGroup.ps1"
-
-# Infrastructure.Secrets provides Get-InfrastructureSecret and
-# Use-MicrosoftPowerShellSecretStoreProvider used below.
-Invoke-ModuleInstall -ModuleName 'Infrastructure.Secrets' -MinimumVersion '3.0.0'
-
-# Posh-SSH is installed here solely to obtain its bundled Renci.SshNet.dll.
-# Posh-SSH's own cmdlets (New-SSHSession, Invoke-SSHCommand) are NOT used
-# because ConnectionInfoGenerator in Posh-SSH 3.x has a bug that drops
-# algorithm entries from the SSH.NET ConnectionInfo, causing "Key exchange
-# negotiation failed" against OpenSSH 9.x (Ubuntu 24.04). SSH.NET is used
-# directly instead via Invoke-SshClientCommand (Infrastructure.Common) and
-# the connection block in the reconciliation loop below.
-Invoke-ModuleInstall -ModuleName 'Posh-SSH'
 
 # ---------------------------------------------------------------------------
 # Register the SecretStore provider for all vault reads in this session.
