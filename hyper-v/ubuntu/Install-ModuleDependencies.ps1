@@ -51,7 +51,7 @@ Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '0.2.0'
 
 # Infrastructure.HyperV (Invoke-SshClientCommand used by Invoke-RunnerTarballDeploy
 # and Test-VmSshPort used by Test-RunnerVmConnectivity)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.2.0'
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.0'
 
 # Infrastructure.Secrets (Get-InfrastructureSecret,
 # Use-MicrosoftPowerShellSecretStoreProvider)
