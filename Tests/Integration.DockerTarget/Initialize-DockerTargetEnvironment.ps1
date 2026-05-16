@@ -147,9 +147,9 @@ Write-Step 4 'installing Infrastructure.HyperV'
 # Provides Invoke-SshClientCommand used by Invoke-SshQuery below, plus
 # Wait-VmSshReady used to gate sshd startup in step 5.
 $_ih = Get-Module -ListAvailable Infrastructure.HyperV |
-    Where-Object { $_.Version -ge [Version]'0.2.0' } | Select-Object -First 1
+    Where-Object { $_.Version -ge [Version]'0.3.0' } | Select-Object -First 1
 if (-not $_ih) {
-    Install-Module Infrastructure.HyperV -MinimumVersion '0.2.0' `
+    Install-Module Infrastructure.HyperV -MinimumVersion '0.3.0' `
         -Scope CurrentUser -Force -SkipPublisherCheck
 }
 Import-Module Infrastructure.HyperV -Force -ErrorAction Stop
