@@ -39,10 +39,21 @@ if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
 # Step 2 - Infrastructure.Common (chicken-and-egg bootstrap)
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'4.0.0') {
+if (-not $_common -or $_common.Version -lt [Version]'4.0.1') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force -AllowClobber
+    # Re-query so the comparison below uses the freshly installed version.
+    $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
+        Sort-Object Version -Descending | Select-Object -First 1
 }
-Import-Module Infrastructure.Common -Force -ErrorAction Stop
+# Reload only when the loaded state differs from the target (multiple
+# versions live, or wrong version live). Mirrors the conditional in
+# Invoke-ModuleInstall - inlined here because the bootstrap installs
+# the very module that defines that function.
+$_loaded = @(Get-Module -Name Infrastructure.Common)
+if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
+    if ($_loaded) { $_loaded | Remove-Module -Force }
+    Import-Module Infrastructure.Common -Force -ErrorAction Stop
+}
 
 # Step 3 - Infrastructure.GitHub (Invoke-GitHubApi, Get-GitHubAppToken,
 # Get-PendingDeployment, Set-DeploymentStatus, Invoke-RunnerTarballEnsure,
@@ -51,7 +62,7 @@ Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '0.2.0'
 
 # Infrastructure.HyperV (Invoke-SshClientCommand used by Invoke-RunnerTarballDeploy
 # and Test-VmSshPort used by Test-RunnerVmConnectivity)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.0'
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.1'
 
 # Infrastructure.Secrets (Get-InfrastructureSecret,
 # Use-MicrosoftPowerShellSecretStoreProvider)

@@ -136,20 +136,30 @@ $sudoersContent | docker exec -i $Script:ContainerName `
 
 Write-Step 4 'installing Infrastructure.Common'
 $_ic = Get-Module -ListAvailable Infrastructure.Common |
-    Where-Object { $_.Version -ge [Version]'4.0.0' } | Select-Object -First 1
+    Where-Object { $_.Version -ge [Version]'4.0.1' } | Select-Object -First 1
 if (-not $_ic) {
-    Install-Module Infrastructure.Common -MinimumVersion '4.0.0' `
+    Install-Module Infrastructure.Common -MinimumVersion '4.0.1' `
         -Scope CurrentUser -Force -SkipPublisherCheck
+    $_ic = Get-Module -ListAvailable Infrastructure.Common |
+        Sort-Object Version -Descending | Select-Object -First 1
 }
-Import-Module Infrastructure.Common -Force -ErrorAction Stop
+# Reload only when the loaded state differs from the target (multiple
+# versions live, or wrong version live). Mirrors the conditional in
+# Invoke-ModuleInstall - inlined here because this script runs before
+# Infrastructure.Common is available.
+$_loaded = @(Get-Module -Name Infrastructure.Common)
+if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_ic.Version) {
+    if ($_loaded) { $_loaded | Remove-Module -Force }
+    Import-Module Infrastructure.Common -Force -ErrorAction Stop
+}
 
 Write-Step 4 'installing Infrastructure.HyperV'
 # Provides Invoke-SshClientCommand used by Invoke-SshQuery below, plus
 # Wait-VmSshReady used to gate sshd startup in step 5.
 $_ih = Get-Module -ListAvailable Infrastructure.HyperV |
-    Where-Object { $_.Version -ge [Version]'0.3.0' } | Select-Object -First 1
+    Where-Object { $_.Version -ge [Version]'0.3.1' } | Select-Object -First 1
 if (-not $_ih) {
-    Install-Module Infrastructure.HyperV -MinimumVersion '0.3.0' `
+    Install-Module Infrastructure.HyperV -MinimumVersion '0.3.1' `
         -Scope CurrentUser -Force -SkipPublisherCheck
 }
 Import-Module Infrastructure.HyperV -Force -ErrorAction Stop
