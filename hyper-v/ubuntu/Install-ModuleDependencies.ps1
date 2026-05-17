@@ -39,7 +39,7 @@ if (-not $_nuget -or $_nuget.Version -lt [Version]'2.8.5.201') {
 # Step 2 - Infrastructure.Common (chicken-and-egg bootstrap)
 $_common = Get-Module -ListAvailable -Name Infrastructure.Common |
     Sort-Object Version -Descending | Select-Object -First 1
-if (-not $_common -or $_common.Version -lt [Version]'4.0.0') {
+if (-not $_common -or $_common.Version -lt [Version]'4.0.1') {
     Install-Module Infrastructure.Common -Scope CurrentUser -Force -AllowClobber
 }
 Import-Module Infrastructure.Common -Force -ErrorAction Stop
@@ -51,7 +51,7 @@ Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '0.2.0'
 
 # Infrastructure.HyperV (Invoke-SshClientCommand used by Invoke-RunnerTarballDeploy
 # and Test-VmSshPort used by Test-RunnerVmConnectivity)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.0'
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.1'
 
 # Infrastructure.Secrets (Get-InfrastructureSecret,
 # Use-MicrosoftPowerShellSecretStoreProvider)
