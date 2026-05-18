@@ -107,9 +107,11 @@ Invoke-ContainerCommand ("mkdir -p /home/$Script:RunnerUser && " +
 
 # -----------------------------------------------------------------------
 # 3. Configure sudoers
-#    Deploy user needs:
-#      - sudo -u infra-t-runner <cmd>   (mkdir, tar, curl as service user)
-#      - sudo systemctl <cmd>           (service management)
+#    These rules mirror the canonical production grants documented in
+#    Infrastructure-Vm-Users README under the runner deploy user. Keeping
+#    them in lockstep is what allows this E2E to catch sudoers-scope bugs
+#    (e.g. a new 'sudo chmod' call missing from the production allowlist)
+#    that a blanket NOPASSWD would silently mask.
 #    !requiretty allows sudo in non-interactive SSH sessions.
 # -----------------------------------------------------------------------
 
@@ -117,8 +119,19 @@ Write-Step 3 'configuring sudoers'
 
 $sudoersPath    = "/etc/sudoers.d/${Script:DeployUser}"
 $sudoersContent = @"
-${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: ALL
-${Script:DeployUser} ALL=(root) NOPASSWD: ALL
+${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /usr/bin/mkdir
+${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /usr/bin/rm
+${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /usr/bin/curl
+${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /usr/bin/tar
+${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /usr/bin/test
+${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/mkdir
+${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/chown
+${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/rm -rf /opt/runners/*
+${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /opt/runners/*/config.sh
+${Script:DeployUser} ALL=(root) NOPASSWD: /opt/runners/*/svc.sh
+${Script:DeployUser} ALL=(root) NOPASSWD: /bin/systemctl start actions.runner.*
+${Script:DeployUser} ALL=(root) NOPASSWD: /bin/systemctl stop actions.runner.*
+${Script:DeployUser} ALL=(root) NOPASSWD: /bin/systemctl is-active actions.runner.*
 Defaults:${Script:DeployUser} !requiretty
 "@
 

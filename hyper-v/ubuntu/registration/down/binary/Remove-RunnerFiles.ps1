@@ -32,9 +32,23 @@ function Remove-RunnerFiles {
         [string] $RunnerDir
     )
 
+    # Two-stage: probe for presence first so an absent directory is a no-op
+    # (idempotency guarantee). The earlier inline '|| true' form swallowed
+    # the rm's exit status and would silently leave the directory behind
+    # whenever sudoers was misconfigured - the failure must surface so
+    # operators can repair the sudoers grants.
+    $probe = Invoke-SshClientCommand `
+        -SshClient $SshClient `
+        -Command   "test -d '$RunnerDir'" `
+        -ErrorAction Stop
+
+    if ($probe.ExitStatus -ne 0) {
+        return
+    }
+
     $r = Invoke-SshClientCommand `
         -SshClient $SshClient `
-        -Command   "test -d '$RunnerDir' && sudo rm -rf '$RunnerDir' || true" `
+        -Command   "sudo rm -rf '$RunnerDir'" `
         -ErrorAction Stop
 
     if ($r.ExitStatus -ne 0) {
