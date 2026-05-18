@@ -58,14 +58,17 @@ function Invoke-RunnerExtract {
         return
     }
 
-    # /opt/runners is root-owned, so mkdir runs as root. chown transfers the
-    # leaf directory to the runner user; chmod 700 prevents other OS users
-    # from reading runner credential files (.credentials, .credentials_rsaparams).
+    # /opt/runners is root-owned, so mkdir runs as root. Mode 700 is set at
+    # creation via mkdir -m to avoid a separate sudo chmod (which would
+    # require a broader sudoers grant); the leaf mode applies because the
+    # test -d guard above ensures we only reach this branch when the
+    # directory does not yet exist. Mode 700 prevents other OS users from
+    # reading runner credential files (.credentials, .credentials_rsaparams).
+    # chown then transfers the leaf to the runner user.
     $mkdir = Invoke-SshClientCommand `
         -SshClient $SshClient `
-        -Command   ("sudo mkdir -p '$runnerDir' && " +
-                    "sudo chown '${RunnerUser}:${RunnerUser}' '$runnerDir' && " +
-                    "sudo chmod 700 '$runnerDir'") `
+        -Command   ("sudo mkdir -p -m 700 '$runnerDir' && " +
+                    "sudo chown '${RunnerUser}:${RunnerUser}' '$runnerDir'") `
         -ErrorAction Stop
 
     if ($mkdir.ExitStatus -ne 0) {
