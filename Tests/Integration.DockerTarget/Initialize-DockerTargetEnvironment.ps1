@@ -126,6 +126,7 @@ ${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /usr/bin/tar
 ${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /usr/bin/test
 ${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/mkdir
 ${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/chown
+${Script:DeployUser} ALL=(root) NOPASSWD: /usr/bin/rm -rf /opt/runners/*
 ${Script:DeployUser} ALL=(${Script:RunnerUser}) NOPASSWD: /opt/runners/*/config.sh
 ${Script:DeployUser} ALL=(root) NOPASSWD: /opt/runners/*/svc.sh
 ${Script:DeployUser} ALL=(root) NOPASSWD: /bin/systemctl start actions.runner.*
