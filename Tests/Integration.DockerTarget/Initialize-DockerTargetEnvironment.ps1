@@ -149,10 +149,37 @@ $sudoersContent | docker exec -i $Script:ContainerName `
 
 Write-Step 4 'installing Infrastructure.Common'
 $_ic = Get-Module -ListAvailable Infrastructure.Common |
-    Where-Object { $_.Version -ge [Version]'4.0.1' } | Select-Object -First 1
+    Where-Object { $_.Version -ge [Version]'5.1.0' } | Select-Object -First 1
 if (-not $_ic) {
-    Install-Module Infrastructure.Common -MinimumVersion '4.0.1' `
-        -Scope CurrentUser -Force -SkipPublisherCheck
+    # Inline retry for the chicken-and-egg case: Invoke-ModuleInstall
+    # (which has retry built in) ships inside Infrastructure.Common, so it
+    # cannot be used to install Common itself. Six attempts with
+    # exponential backoff (10 s -> 20 -> 40 -> 80 -> 160, capped at 300 s)
+    # covers transient PSGallery "Unable to resolve package source" blips
+    # without stalling an integration run on a real outage.
+    $_installAttempts        = 6
+    $_installDelaySeconds    = 10
+    $_installMaxDelaySeconds = 300
+    for ($_attempt = 1; $_attempt -le $_installAttempts; $_attempt++) {
+        try {
+            # -ErrorAction Stop promotes the PSGallery resolution warning
+            # to a terminating error so the catch block can retry it.
+            Install-Module Infrastructure.Common -MinimumVersion '5.1.0' `
+                -Scope CurrentUser -Force -SkipPublisherCheck -ErrorAction Stop
+            break
+        }
+        catch {
+            if ($_attempt -ge $_installAttempts) { throw }
+            Write-Warning (
+                "Install-Module Infrastructure.Common failed " +
+                "(attempt $_attempt/$_installAttempts): " +
+                "$($_.Exception.Message). Retrying in ${_installDelaySeconds}s ..."
+            )
+            Start-Sleep -Seconds $_installDelaySeconds
+            $_installDelaySeconds = [Math]::Min(
+                $_installDelaySeconds * 2, $_installMaxDelaySeconds)
+        }
+    }
     $_ic = Get-Module -ListAvailable Infrastructure.Common |
         Sort-Object Version -Descending | Select-Object -First 1
 }
