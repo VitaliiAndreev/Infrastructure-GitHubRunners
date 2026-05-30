@@ -60,16 +60,16 @@ Infrastructure-Vm-Provisioner and Infrastructure-Vm-Users.
 Follows the exact bootstrap pattern from Infrastructure-Vm-Provisioner
 (`hyper-v/ubuntu/setup-secrets.ps1`):
 
-1. Inline guard installs/imports `Infrastructure.Common` (the only install
+1. Inline guard installs/imports `PowerShell.Common` (the only install
    logic that cannot use `Invoke-ModuleInstall` — the function isn't
    available until the module is loaded).
-2. `Invoke-ModuleInstall` (from `Infrastructure.Common`) installs and imports
+2. `Invoke-ModuleInstall` (from `PowerShell.Common`) installs and imports
    `Infrastructure.Secrets`, version-gated.
 3. `Initialize-InfrastructureVault` called with:
    - Vault: `GitHubRunners`
    - Secret: `GitHubRunnersConfig`
    - `-Validate`: scriptblock that calls `Assert-RequiredProperties` (from
-     `Infrastructure.Common`) on each entry — validation runs inside
+     `PowerShell.Common`) on each entry — validation runs inside
      `Initialize-InfrastructureVault` before the vault is touched.
 
 **Multi-repo constraint** - a repo-level runner is bound to exactly one
@@ -146,7 +146,7 @@ sequenceDiagram
     participant PSG as PSGallery
     participant V as GitHubRunners vault
 
-    SS->>PSG: install Infrastructure.Common (inline guard)
+    SS->>PSG: install PowerShell.Common (inline guard)
     PSG-->>SS: module loaded
     SS->>PSG: Invoke-ModuleInstall Infrastructure.Secrets
     PSG-->>SS: module loaded
@@ -159,7 +159,7 @@ sequenceDiagram
 ## Step 3 - register-runners.ps1: vault read + validation
 
 **What:** Opening section of `register-runners.ps1` that:
-1. Imports `Infrastructure.Common` (install guard, same inline pattern as
+1. Imports `PowerShell.Common` (install guard, same inline pattern as
    Step 2 — `register-runners.ps1` is run independently so it cannot rely
    on setup-secrets.ps1 having been run in the same session).
 2. Prompts for the GitHub PAT via `Read-Host -AsSecureString` - never
@@ -171,7 +171,7 @@ sequenceDiagram
    `Get-InfrastructureSecret` — extracts the `password` for each
    `deployUsername` entry. This vault is the canonical source of deploy
    credentials; no password is stored in the `GitHubRunners` vault.
-5. Calls `Assert-RequiredProperties` (from `Infrastructure.Common`) on each
+5. Calls `Assert-RequiredProperties` (from `PowerShell.Common`) on each
    runner config entry to validate required fields.
 6. Joins runner entries to deploy passwords by `vmName` + `deployUsername`
    — warns and skips any entry with no matching password in VmUsers config.
@@ -219,7 +219,7 @@ sequenceDiagram
    (same pattern as `create-users.ps1` in Infrastructure-Vm-Users):
    construct `PasswordAuthenticationMethod` + `ConnectionInfo` +
    `SshClient`, then call `Invoke-SshClientCommand` (from
-   `Infrastructure.Common`) for all remote commands. Posh-SSH is
+   `PowerShell.Common`) for all remote commands. Posh-SSH is
    installed via `Invoke-ModuleInstall` solely for its bundled
    `Renci.SshNet.dll`. The password must never be logged.
 2. Resolve the latest runner version from the GitHub Releases API.

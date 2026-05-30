@@ -1,6 +1,6 @@
 BeforeAll {
     # Stub Infrastructure.* and helper functions the SUT depends on, so the
-    # unit test stays unit-scoped (no Import-Module Infrastructure.Common).
+    # unit test stays unit-scoped (no Import-Module PowerShell.Common).
     function Get-InfrastructureSecret            { param($VaultName, $SecretName) }
     function ConvertFrom-GitHubRunnersConfigJson { param($Json) }
     function ConvertTo-Array                     { param($Value) ,@($Value) }
