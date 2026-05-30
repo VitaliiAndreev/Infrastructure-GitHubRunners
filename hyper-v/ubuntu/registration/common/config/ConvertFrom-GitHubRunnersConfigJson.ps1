@@ -1,7 +1,7 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    setup-secrets.ps1 and register-runners.ps1 after Infrastructure.Common
+    setup-secrets.ps1 and register-runners.ps1 after PowerShell.Common
     is loaded.
 #>
 

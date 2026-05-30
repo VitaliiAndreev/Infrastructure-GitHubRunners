@@ -15,7 +15,7 @@
 
 ## Context
 
-Infrastructure-Common (2.0.0), Infrastructure-Secrets (3.0.0),
+PowerShell-Common (2.0.0), Infrastructure-Secrets (3.0.0),
 Infrastructure-Vm-Provisioner, and Infrastructure-Vm-Users have all dropped
 PS 5.1 support. Infrastructure-GitHubRunners is the last repo in the family
 that still declares PS 5.1 compatibility.
@@ -70,13 +70,13 @@ versions for the two upstream modules:
 
 | File | Module | Old pin | New pin |
 |------|--------|---------|---------|
-| `setup-secrets.ps1` | Infrastructure.Common | `1.3.3` | `2.0.0` |
+| `setup-secrets.ps1` | PowerShell.Common | `1.3.3` | `2.0.0` |
 | `setup-secrets.ps1` | Infrastructure.Secrets | `2.1.0` | `3.0.0` |
-| `register-runners.ps1` | Infrastructure.Common | `1.3.3` | `2.0.0` |
+| `register-runners.ps1` | PowerShell.Common | `1.3.3` | `2.0.0` |
 | `register-runners.ps1` | Infrastructure.Secrets | `2.1.0` | `3.0.0` |
-| `deregister-runners.ps1` | Infrastructure.Common | `1.3.3` | `2.0.0` |
+| `deregister-runners.ps1` | PowerShell.Common | `1.3.3` | `2.0.0` |
 | `deregister-runners.ps1` | Infrastructure.Secrets | `2.1.0` | `3.0.0` |
-| `Tests/Integration/Initialize-SshEnvironment.ps1` | Infrastructure.Common | `1.3.3` | `2.0.0` |
+| `Tests/Integration/Initialize-SshEnvironment.ps1` | PowerShell.Common | `1.3.3` | `2.0.0` |
 
 ### Documentation
 
@@ -84,7 +84,7 @@ versions for the two upstream modules:
 |------|--------|
 | `README.md` | Add Requirements section with index entry: "PowerShell 7+ (`pwsh`). Windows PowerShell 5.1 is not supported." |
 | `README.md` | Prerequisites: "PowerShell 5.1+" → "PowerShell 7+" |
-| `README.md` | Prerequisites: `Infrastructure.Common >= 1.3.3` → `>= 2.0.0` |
+| `README.md` | Prerequisites: `PowerShell.Common >= 1.3.3` → `>= 2.0.0` |
 | `README.md` | CI section: remove mention of PS 5.1 test job |
 
 ---

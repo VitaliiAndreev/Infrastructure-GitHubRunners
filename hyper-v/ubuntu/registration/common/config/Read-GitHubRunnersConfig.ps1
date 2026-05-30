@@ -1,7 +1,7 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    register-runners.ps1 after Infrastructure.Common, Infrastructure.Secrets,
+    register-runners.ps1 after PowerShell.Common, Infrastructure.Secrets,
     and ConvertFrom-GitHubRunnersConfigJson.ps1 are loaded.
 #>
 
