@@ -37,7 +37,12 @@ param(
     # GitHub token. When provided, skips the interactive Read-GitHubPat
     # prompt - required for unattended callers such as the E2E agent.
     [Parameter()]
-    [string] $Token = ''
+    [string] $Token = '',
+
+    # Required. See register-runners.ps1 for the suffix contract.
+    [Parameter(Mandatory)]
+    [ValidateNotNullOrEmpty()]
+    [string] $SecretSuffix
 )
 
 Set-StrictMode -Version Latest
@@ -92,8 +97,8 @@ if (-not $Token) {
 # Read configs from vaults
 # ---------------------------------------------------------------------------
 
-$runnerEntries   = Read-GitHubRunnersConfig
-$deployPasswords = Read-VmDeployPasswords
+$runnerEntries   = Read-GitHubRunnersConfig -SecretSuffix $SecretSuffix
+$deployPasswords = Read-VmDeployPasswords    -SecretSuffix $SecretSuffix
 
 # ---------------------------------------------------------------------------
 # Join runner entries to deploy credentials
