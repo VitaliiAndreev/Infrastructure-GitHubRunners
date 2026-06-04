@@ -17,13 +17,23 @@
 
 function Read-VmDeployPasswords {
     [CmdletBinding()]
-    param()
+    param(
+        # Required. The secret read is `VmUsersConfig-<Suffix>` (cross-
+        # repo - same suffix the caller uses for GitHubRunnersConfig).
+        # See provision.ps1 in Infrastructure-Vm-Provisioner for the
+        # suffix contract.
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $SecretSuffix
+    )
 
-    Write-Host "Reading VmUsersConfig from VmUsers vault ..." -ForegroundColor Cyan
+    $secretName = "VmUsersConfig-$SecretSuffix"
+
+    Write-Host "Reading $secretName from VmUsers vault ..." -ForegroundColor Cyan
 
     $json   = Get-InfrastructureSecret `
                   -VaultName  'VmUsers' `
-                  -SecretName 'VmUsersConfig'
+                  -SecretName $secretName
     # Assign before wrapping with @(): in PS 7, ConvertFrom-Json emits the
     # array as a single pipeline item, so @($pipeline) wraps it in a 1-element
     # array. @($variable) unrolls an existing array and gives the correct count.
@@ -56,7 +66,7 @@ function Read-VmDeployPasswords {
         }
     }
 
-    Write-Host "OK - $($index.Count) deploy credential(s) indexed from VmUsersConfig." `
+    Write-Host "OK - $($index.Count) deploy credential(s) indexed from $secretName." `
         -ForegroundColor Green
     $index
 }

@@ -13,17 +13,26 @@
 
 function Read-GitHubRunnersConfig {
     [CmdletBinding()]
-    param()
+    param(
+        # Required. The secret read is `GitHubRunnersConfig-<Suffix>`.
+        # See provision.ps1 in Infrastructure-Vm-Provisioner for the
+        # suffix contract.
+        [Parameter(Mandatory)]
+        [ValidateNotNullOrEmpty()]
+        [string] $SecretSuffix
+    )
 
-    Write-Host "Reading GitHubRunnersConfig from GitHubRunners vault ..." `
+    $secretName = "GitHubRunnersConfig-$SecretSuffix"
+
+    Write-Host "Reading $secretName from GitHubRunners vault ..." `
         -ForegroundColor Cyan
 
     $json    = Get-InfrastructureSecret `
                    -VaultName  'GitHubRunners' `
-                   -SecretName 'GitHubRunnersConfig'
+                   -SecretName $secretName
     $entries = ConvertTo-Array (ConvertFrom-GitHubRunnersConfigJson -Json $json)
 
-    Write-Host "OK - $($entries.Count) runner entry/entries in GitHubRunnersConfig." `
+    Write-Host "OK - $($entries.Count) runner entry/entries in $secretName." `
         -ForegroundColor Green
     ConvertTo-Array $entries
 }
