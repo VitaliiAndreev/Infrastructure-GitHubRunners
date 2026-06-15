@@ -63,7 +63,7 @@ operator-facing documentation to reflect the PS 7+ requirement.
 | `README.md` | Index | Add `- [Requirements](#requirements)` entry |
 | `README.md` | After index / before Prerequisites | Add Requirements section: "PowerShell 7+ (`pwsh`). Windows PowerShell 5.1 is not supported." |
 | `README.md` | Line 22 | "PowerShell 5.1+" → "PowerShell 7+" |
-| `README.md` | Line 23 | `PowerShell.Common >= 1.3.3` → `>= 2.0.0` |
+| `README.md` | Line 23 | `Common.PowerShell >= 1.3.3` → `>= 2.0.0` |
 
 ### Tests
 

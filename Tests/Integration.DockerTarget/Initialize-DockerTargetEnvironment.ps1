@@ -49,21 +49,21 @@ $Script:ContainerName = 'infra-ssh-test'
 # In CI the build-ssh-test-image action pre-builds the image before Pester
 # runs, so docker images returns a non-empty ID and we skip the build.
 # In local dev the image is absent on first run; we resolve the Dockerfile
-# from GitHub-Common as a sibling checkout of this repo.
+# from Common-Automation as a sibling checkout of this repo.
 $existingImage = docker images -q $Script:ImageName 2>&1
 if ($existingImage) {
     Write-Step 0 'SSH test image already present - skipping build'
 } else {
     Write-Step 0 'building SSH test image'
     # $PSScriptRoot = <repo>\Tests\Integration.DockerTarget; three parents
-    # up is the shared repos root that hosts GitHub-Common as a sibling.
+    # up is the shared repos root that hosts Common-Automation as a sibling.
     $reposRoot = Split-Path -Parent (Split-Path -Parent (Split-Path -Parent $PSScriptRoot))
     $dockerfileDir = [IO.Path]::Combine(
-        $reposRoot, 'GitHub-Common',
+        $reposRoot, 'Common-Automation',
         '.github', 'actions', 'build-ssh-test-image')
     if (-not (Test-Path $dockerfileDir)) {
-        throw ("GitHub-Common Dockerfile not found at $dockerfileDir. " +
-               'Expected GitHub-Common to be checked out as a sibling of this repo.')
+        throw ("Common-Automation Dockerfile not found at $dockerfileDir. " +
+               'Expected Common-Automation to be checked out as a sibling of this repo.')
     }
     $buildOutput = docker build -t $Script:ImageName $dockerfileDir 2>&1
     if ($LASTEXITCODE -ne 0) {
@@ -150,12 +150,12 @@ $sudoersContent | docker exec -i $Script:ContainerName `
 #    against the container in step 6.
 # -----------------------------------------------------------------------
 
-Write-Step 4 'installing PowerShell.Common'
-$_ic = Get-Module -ListAvailable PowerShell.Common |
+Write-Step 4 'installing Common.PowerShell'
+$_ic = Get-Module -ListAvailable Common.PowerShell |
     Where-Object { $_.Version -ge [Version]'5.1.0' } | Select-Object -First 1
 if (-not $_ic) {
     # Inline retry for the chicken-and-egg case: Invoke-ModuleInstall
-    # (which has retry built in) ships inside PowerShell.Common, so it
+    # (which has retry built in) ships inside Common.PowerShell, so it
     # cannot be used to install Common itself. Six attempts with
     # exponential backoff (10 s -> 20 -> 40 -> 80 -> 160, capped at 300 s)
     # covers transient PSGallery "Unable to resolve package source" blips
@@ -167,14 +167,14 @@ if (-not $_ic) {
         try {
             # -ErrorAction Stop promotes the PSGallery resolution warning
             # to a terminating error so the catch block can retry it.
-            Install-Module PowerShell.Common -MinimumVersion '5.1.0' `
+            Install-Module Common.PowerShell -MinimumVersion '5.1.0' `
                 -Scope CurrentUser -Force -SkipPublisherCheck -ErrorAction Stop
             break
         }
         catch {
             if ($_attempt -ge $_installAttempts) { throw }
             Write-Warning (
-                "Install-Module PowerShell.Common failed " +
+                "Install-Module Common.PowerShell failed " +
                 "(attempt $_attempt/$_installAttempts): " +
                 "$($_.Exception.Message). Retrying in ${_installDelaySeconds}s ..."
             )
@@ -183,17 +183,17 @@ if (-not $_ic) {
                 $_installDelaySeconds * 2, $_installMaxDelaySeconds)
         }
     }
-    $_ic = Get-Module -ListAvailable PowerShell.Common |
+    $_ic = Get-Module -ListAvailable Common.PowerShell |
         Sort-Object Version -Descending | Select-Object -First 1
 }
 # Reload only when the loaded state differs from the target (multiple
 # versions live, or wrong version live). Mirrors the conditional in
 # Invoke-ModuleInstall - inlined here because this script runs before
-# PowerShell.Common is available.
-$_loaded = @(Get-Module -Name PowerShell.Common)
+# Common.PowerShell is available.
+$_loaded = @(Get-Module -Name Common.PowerShell)
 if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_ic.Version) {
     if ($_loaded) { $_loaded | Remove-Module -Force }
-    Import-Module PowerShell.Common -Force -ErrorAction Stop
+    Import-Module Common.PowerShell -Force -ErrorAction Stop
 }
 
 Write-Step 4 'installing Infrastructure.HyperV'
