@@ -14,6 +14,7 @@ provisioned by
 - [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
 - [Idempotency](#idempotency)
 - [Deregistration](#deregistration)
+- [CI and linting](#ci-and-linting)
 - [Repo structure](#repo-structure)
 
 ---
@@ -190,9 +191,65 @@ are silently skipped, and absent runner directories are ignored.
 
 ---
 
+## CI and linting
+
+The PowerShell logic is tested with Pester via `scripts\Run-Tests.ps1`. The
+YAML and Bash surfaces (workflows, the `*.sh` runners) are linted by a
+separate suite that delegates to **Common-Automation** so every repo lints
+against one shared engine - no per-repo copies of the lint config to drift.
+
+| Workflow | Runs | Calls |
+|---|---|---|
+| `.github/workflows/ci-yaml.yml` | actionlint, action-validator, yamllint, ansible-lint | Common-Automation reusable `ci-yaml.yml` |
+| `.github/workflows/ci-bash.yml` | shellcheck, check-sh-executable, bats | Common-Automation reusable `ci-bash.yml` |
+
+Each linter auto-skips when its surface is absent, so a repo with no Ansible
+or no Bash still gets a green run.
+
+To reproduce the exact CI locally (Git Bash + Docker), use the main runner. It
+runs the full lint suite AND the bats tests - the local equivalent of this
+repo's `ci-yaml.yml` + `ci-bash.yml`:
+
+```bash
+# MAIN entry: full lint suite + bats tests (local ci-yaml.yml + ci-bash.yml).
+scripts/run-ci-yaml-and-bash.sh              # or double-click scripts\run-ci-yaml-and-bash.bat
+```
+
+To run just one half:
+
+```bash
+# Lint half only (shellcheck, actionlint, action-validator, yamllint,
+# ansible-lint). Distinct from the Pester runner Run-Tests.ps1; runs no
+# PowerShell tests.
+scripts/run-lint-yaml-and-bash.sh            # or double-click scripts\run-lint-yaml-and-bash.bat
+
+# Bats test half only.
+scripts/run-tests-bash.sh                    # or double-click scripts\run-tests-bash.bat
+
+# Re-stage the +x bit on tracked *.sh files (Windows checkouts drop it,
+# which trips the check-sh-executable gate).
+scripts/fix-permissions.sh     # or scripts\fix-permissions.bat
+```
+
+All three runners are thin shims over Common-Automation's engine, pointed at
+this repo via the `COMMON_AUTOMATION_TARGET_REPO` env var, so a sibling
+checkout at `..\Common-Automation` is required. `.gitattributes` pins `*.sh`
+to LF and `*.bat` to CRLF - Linux CI runners reject CRLF shebangs.
+
+---
+
 ## Repo structure
 
 ```
+.github/workflows/
+  ci-yaml.yml                 Delegates to Common-Automation reusable ci-yaml.yml
+  ci-bash.yml                 Delegates to Common-Automation reusable ci-bash.yml
+scripts/
+  run-ci-yaml-and-bash.sh / .bat            MAIN local runner: full lint suite + bats tests (Common-Automation engine)
+  run-lint-yaml-and-bash.sh / .bat          Lint half only (shellcheck, actionlint, action-validator, yamllint, ansible-lint)
+  run-tests-bash.sh / .bat                  Bats test half only
+  fix-permissions.sh / .bat   Re-stage +x on tracked *.sh via the shared engine
+.gitattributes                Pins *.sh to LF and *.bat to CRLF
 hyper-v/ubuntu/
   setup-secrets.ps1           Store runner config in the local vault
   register-runners.ps1        Orchestrator for runner registration
