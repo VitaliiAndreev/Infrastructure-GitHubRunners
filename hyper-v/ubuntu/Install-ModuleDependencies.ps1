@@ -105,9 +105,13 @@ if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
 # Invoke-RunnerTarballDeploy)
 Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '0.2.0'
 
-# Infrastructure.HyperV (Invoke-SshClientCommand used by Invoke-RunnerTarballDeploy
-# and Test-VmSshPort used by Test-RunnerVmConnectivity)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.3.1'
+# Infrastructure.HyperV (Invoke-SshClientCommand used by
+# Invoke-RunnerTarballDeploy, Test-VmSshPort used by Test-RunnerVmConnectivity,
+# plus New-VmSshClientWithJump / Get-VmKvpIpAddress / Get-VmSwitchHostIp used
+# by register-runners.ps1 + deregister-runners.ps1 to reach workloads behind
+# the feature-53 NAT router and bind the host file server on the router's
+# upstream LAN - all added in 0.11.0).
+Invoke-ModuleInstall -ModuleName 'Infrastructure.HyperV' -MinimumVersion '0.11.0'
 
 # Infrastructure.Secrets (Get-InfrastructureSecret,
 # Use-MicrosoftPowerShellSecretStoreProvider)

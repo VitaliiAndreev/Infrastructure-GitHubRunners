@@ -101,6 +101,58 @@ $runnerEntries   = Read-GitHubRunnersConfig -SecretSuffix $SecretSuffix
 $deployPasswords = Read-VmDeployPasswords    -SecretSuffix $SecretSuffix
 
 # ---------------------------------------------------------------------------
+# Router-VM resolution (feature-53 NAT topology)
+#   Read VmProvisionerConfig to find the router row (kind == 'router'),
+#   discover its upstream IP via Hyper-V KVP when absent, and stamp it as
+#   _RouterVm on every runner entry sharing the router's privateSwitchName.
+#   New-VmSshClientWithJump downstream uses that property to decide
+#   direct-vs-jumped session per VM. Symmetric with register-runners.ps1.
+# ---------------------------------------------------------------------------
+
+$provisionerJson = Get-InfrastructureSecret `
+                       -VaultName  'VmProvisioner' `
+                       -SecretName "VmProvisionerConfig-$SecretSuffix"
+$provisionerVms  = @($provisionerJson | ConvertFrom-Json)
+
+$routerVm = $provisionerVms | Where-Object {
+    $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
+} | Select-Object -First 1
+
+if ($null -ne $routerVm) {
+    Import-Module Hyper-V -ErrorAction Stop
+
+    if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
+        Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
+            -NoNewline -ForegroundColor Cyan
+        $routerIp = Get-VmKvpIpAddress `
+                        -VmName     $routerVm.vmName `
+                        -SwitchName $routerVm.externalSwitchName `
+                        -OnPoll     { Write-Host '.' -NoNewline -ForegroundColor Cyan }
+        Add-Member -InputObject $routerVm -MemberType NoteProperty `
+                   -Name 'ipAddress' -Value $routerIp -Force
+        Write-Host " $routerIp" -ForegroundColor Green
+    }
+
+    $provisionerIndex = @{}
+    foreach ($vm in $provisionerVms) {
+        $provisionerIndex[$vm.vmName] = $vm
+    }
+    foreach ($entry in $runnerEntries) {
+        if (-not $provisionerIndex.ContainsKey($entry.vmName)) { continue }
+        $provVm   = $provisionerIndex[$entry.vmName]
+        $isRouter = $provVm.PSObject.Properties['kind'] -and `
+                    $provVm.kind -eq 'router'
+        if ($isRouter) { continue }
+        $sameEnv  = $provVm.PSObject.Properties['privateSwitchName'] -and `
+                    $provVm.privateSwitchName -eq $routerVm.privateSwitchName
+        if (-not $sameEnv) { continue }
+
+        Add-Member -InputObject $entry -MemberType NoteProperty `
+                   -Name '_RouterVm' -Value $routerVm -Force
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Join runner entries to deploy credentials
 #    Entries with no matching password in VmUsers vault are warned and
 #    skipped - they likely reference a user not yet created by
@@ -148,18 +200,27 @@ foreach ($group in $vmGroups) {
         Write-Host ""
         Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
 
-        $sshClient = $null
+        # See register-runners.ps1 for the vmShim rationale - New-VmSsh-
+        # ClientWithJump expects ipAddress/username/password on a single
+        # object, and runner entries use deployUsername.
+        $vmShim = [PSCustomObject]@{
+            ipAddress = $ipAddress
+            username  = $username
+            password  = $password
+        }
+        if ($first.Entry.PSObject.Properties['_RouterVm'] -and `
+            $first.Entry._RouterVm) {
+            Add-Member -InputObject $vmShim -MemberType NoteProperty `
+                       -Name '_RouterVm' -Value $first.Entry._RouterVm -Force
+        }
+
+        $sshSession = $null
 
         try {
-            $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
-                             $username, $password)
-            $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
-                             $ipAddress, $username, @($auth))
-            $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
-            $sshClient.Connect()
+            $sshSession = New-VmSshClientWithJump -Vm $vmShim
 
             Invoke-VmDeregisterGroup `
-                -SshClient $sshClient `
+                -SshClient $sshSession.Client `
                 -VmName    $vmName `
                 -Targets   $group.Group `
                 -Token     $token
@@ -168,9 +229,8 @@ foreach ($group in $vmGroups) {
             Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
         }
         finally {
-            if ($null -ne $sshClient) {
-                if ($sshClient.IsConnected) { $sshClient.Disconnect() }
-                $sshClient.Dispose()
+            if ($null -ne $sshSession) {
+                try { $sshSession.Dispose() } catch {}
             }
         }
     }

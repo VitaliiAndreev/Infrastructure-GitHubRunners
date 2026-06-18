@@ -38,6 +38,7 @@ self-hosted GitHub Actions runner on each VM and keep it running as a service.
 ### Constraints
 
 - Script runs on Windows, communicates with VMs via SSH using SSH.NET
+  directly via `Invoke-SshClientCommand` (`Common.PowerShell`).
   Posh-SSH is installed only as the carrier for its bundled
   `Renci.SshNet.dll`; its own cmdlets are not used (Posh-SSH 3.x has a
   bug that drops key-exchange algorithms, breaking connections against

@@ -29,6 +29,21 @@ function Test-RunnerVmConnectivity {
         $name = $t.Entry.runnerName
         $ip   = $t.Entry.ipAddress
 
+        # Feature-53 workloads behind a NAT router carry _RouterVm
+        # stamped by register-runners.ps1; a direct Test-VmSshPort
+        # against their private-switch IP would always return $false
+        # because the host has no route there. Trust the upstream
+        # router-resolution step and rely on the SSH session attempt's
+        # own diagnostics if the workload turns out to be down.
+        $hasRouter = $t.Entry.PSObject.Properties['_RouterVm'] -and `
+                     $t.Entry._RouterVm
+        if ($hasRouter) {
+            Write-Host "[$name] Skipping direct SSH probe (jumped through router)." `
+                -ForegroundColor Cyan
+            $reachable.Add($t)
+            continue
+        }
+
         Write-Host "[$name] Probing SSH ..." -ForegroundColor Cyan
 
         if (Test-VmSshPort -IpAddress $ip) {
