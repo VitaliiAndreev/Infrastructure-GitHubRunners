@@ -6,7 +6,7 @@
     Run once per machine before running register-runners.ps1.
     Re-running safely updates the stored config.
 
-    Installs PowerShell.Common and Infrastructure.Secrets from PSGallery
+    Installs Common.PowerShell and Infrastructure.Secrets from PSGallery
     automatically if not already present on this machine.
 
 .PARAMETER ConfigJson
@@ -51,7 +51,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 # Install / import every required PowerShell module via the centralised
-# helper. Owns NuGet provider, PowerShell.Common, Infrastructure.Secrets,
+# helper. Owns NuGet provider, Common.PowerShell, Infrastructure.Secrets,
 # and the rest of this repo's deps in one place.
 . "$PSScriptRoot\Install-ModuleDependencies.ps1"
 

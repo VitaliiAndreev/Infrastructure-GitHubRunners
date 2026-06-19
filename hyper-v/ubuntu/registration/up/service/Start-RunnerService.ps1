@@ -1,7 +1,7 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    register-runners.ps1 after PowerShell.Common is loaded.
+    register-runners.ps1 after Common.PowerShell is loaded.
     Get-RunnerServiceName.ps1 must also be dot-sourced before this function
     is called.
 #>

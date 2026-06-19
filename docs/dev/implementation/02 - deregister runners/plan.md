@@ -357,7 +357,7 @@ sequenceDiagram
 Orchestrator that owns the reachable/unreachable split. Structure mirrors
 `register-runners.ps1`:
 
-1. Same `PowerShell.Common` / `Infrastructure.Secrets` / Posh-SSH
+1. Same `Common.PowerShell` / `Infrastructure.Secrets` / Posh-SSH
    bootstrap block (copy verbatim - rationale unchanged, see
    [feature 01 plan step 3](../01%20-%20initial%20implementation/plan.md#step-3---register-runnersps1-vault-read--validation)).
 2. `-Force` switch parameter.

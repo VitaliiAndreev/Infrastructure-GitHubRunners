@@ -120,3 +120,53 @@ Describe 'register-runners.ps1 - suffix forwarding to vault helpers' {
         Test-ForwardsSecretSuffix -Call $call | Should -BeTrue
     }
 }
+
+
+Describe 'register-runners.ps1 - jump-host wiring (feature 53 NAT topology)' {
+
+    # The host has no route into the per-environment private switch
+    # runner VMs sit on after feature 53 step 2. The script must (1)
+    # read VmProvisionerConfig to find the router row, (2) discover
+    # its upstream IP via KVP, (3) stamp _RouterVm onto every runner
+    # entry in the same env, (4) reach workloads via the jump-aware
+    # New-VmSshClientWithJump instead of constructing a Renci.SshNet.
+    # SshClient directly, and (5) bind the host file server on the
+    # router's upstream LAN (Get-VmSwitchHostIp keyed on the router
+    # IP) so workloads can reach it via the router's MASQUERADE NAT.
+
+    It 'reads VmProvisionerConfig to locate the router row' {
+        $text = Get-Content -LiteralPath $script:scriptPath -Raw
+        $text | Should -Match 'VmProvisionerConfig-\$SecretSuffix'
+    }
+
+    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
+        $call = $script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Get-VmKvpIpAddress' } |
+            Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
+        $call = $script:commands |
+            Where-Object { $_.GetCommandName() -eq 'New-VmSshClientWithJump' } |
+            Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'binds the file server via Get-VmSwitchHostIp on the router upstream when router present' {
+        $call = $script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Get-VmSwitchHostIp' } |
+            Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'stamps _RouterVm onto entries via Add-Member' {
+        $text = Get-Content -LiteralPath $script:scriptPath -Raw
+        $text | Should -Match "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
+    }
+
+    It 'no longer constructs Renci.SshNet.SshClient directly' {
+        $text = Get-Content -LiteralPath $script:scriptPath -Raw
+        $text | Should -Not -Match '\[Renci\.SshNet\.SshClient\]::new'
+    }
+}

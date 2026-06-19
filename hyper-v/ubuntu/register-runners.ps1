@@ -90,6 +90,71 @@ $runnerEntries   = Read-GitHubRunnersConfig -SecretSuffix $SecretSuffix
 $deployPasswords = Read-VmDeployPasswords    -SecretSuffix $SecretSuffix
 
 # ---------------------------------------------------------------------------
+# Router-VM resolution (feature-53 NAT topology)
+#   Read VmProvisionerConfig to find the router row (kind == 'router'),
+#   discover its upstream IP via Hyper-V KVP when absent, and stamp it as
+#   _RouterVm on every runner entry sharing the router's privateSwitchName.
+#   New-VmSshClientWithJump downstream uses that property to decide
+#   direct-vs-jumped session per VM without callers having to thread the
+#   router VM explicitly. When no router row is present the topology
+#   predates feature 53 - every workload keeps the legacy direct path.
+#
+#   Symmetric with the same resolution block in create-users.ps1 /
+#   remove-users.ps1.
+# ---------------------------------------------------------------------------
+
+$provisionerJson = Get-InfrastructureSecret `
+                       -VaultName  'VmProvisioner' `
+                       -SecretName "VmProvisionerConfig-$SecretSuffix"
+$provisionerVms  = @($provisionerJson | ConvertFrom-Json)
+
+$routerVm = $provisionerVms | Where-Object {
+    $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
+} | Select-Object -First 1
+
+if ($null -ne $routerVm) {
+    Import-Module Hyper-V -ErrorAction Stop
+
+    # Static-mode routers (externalDhcp = false) keep their ipAddress in
+    # the vault; DHCP-mode routers (the schema default) carry it only in
+    # Hyper-V KVP. Discover on demand so both modes work without
+    # forking the call site.
+    if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
+        Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
+            -NoNewline -ForegroundColor Cyan
+        $routerIp = Get-VmKvpIpAddress `
+                        -VmName     $routerVm.vmName `
+                        -SwitchName $routerVm.externalSwitchName `
+                        -OnPoll     { Write-Host '.' -NoNewline -ForegroundColor Cyan }
+        Add-Member -InputObject $routerVm -MemberType NoteProperty `
+                   -Name 'ipAddress' -Value $routerIp -Force
+        Write-Host " $routerIp" -ForegroundColor Green
+    }
+
+    # Stamp _RouterVm on each runner entry whose corresponding
+    # provisioner row sits on the router's privateSwitchName. Match by
+    # vmName since runner entries do not carry switch fields
+    # themselves.
+    $provisionerIndex = @{}
+    foreach ($vm in $provisionerVms) {
+        $provisionerIndex[$vm.vmName] = $vm
+    }
+    foreach ($entry in $runnerEntries) {
+        if (-not $provisionerIndex.ContainsKey($entry.vmName)) { continue }
+        $provVm   = $provisionerIndex[$entry.vmName]
+        $isRouter = $provVm.PSObject.Properties['kind'] -and `
+                    $provVm.kind -eq 'router'
+        if ($isRouter) { continue }
+        $sameEnv  = $provVm.PSObject.Properties['privateSwitchName'] -and `
+                    $provVm.privateSwitchName -eq $routerVm.privateSwitchName
+        if (-not $sameEnv) { continue }
+
+        Add-Member -InputObject $entry -MemberType NoteProperty `
+                   -Name '_RouterVm' -Value $routerVm -Force
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Join runner entries to deploy credentials
 #    Entries with no matching password in VmUsers vault are warned and
 #    skipped - they likely reference a user not yet created by
@@ -127,8 +192,16 @@ $_tarLocalPath = Invoke-RunnerTarballEnsure `
 #   The file server runs for the duration of all VM installs and is stopped
 #   in a finally block by Invoke-WithVmFileServer regardless of errors.
 #
-#   The host IP is derived from the first reachable VM's ipAddress - all VMs
-#   are on the same Hyper-V internal switch so any of them works.
+#   File-server binding decision:
+#     - No router (legacy / pre-feature-53): bind on the host adapter
+#       sharing the runner VM's /24. Invoke-WithVmFileServer's
+#       -VmIpAddress path calls Get-VmSwitchHostIp on it.
+#     - With router (feature-53 NAT): the runner VM lives on a private
+#       switch the host has no route to, so binding by its IP throws
+#       "No host adapter found". Resolve the host adapter on the
+#       router's UPSTREAM LAN instead and pass -HostIp explicitly;
+#       runners reach the listener via their default route -> router
+#       priv0 -> router MASQUERADE on ext0 -> host.
 #
 #   Group reachable entries by VM so one SSH connection handles all runners
 #   on a host. Open the connection as the deploy user - admin credentials
@@ -137,15 +210,23 @@ $_tarLocalPath = Invoke-RunnerTarballEnsure `
 #   Security: deployPassword must never appear in SSH commands, console
 #   output, or error messages. Log only vmName and deployUsername.
 #   Registration tokens are treated with the same care.
-#
-#   SSH.NET is used directly (not Posh-SSH cmdlets) - see the Posh-SSH
-#   comment above for why.
 # ---------------------------------------------------------------------------
 
-$_hostVmIp = ($reachable | Select-Object -First 1).Entry.ipAddress
-$vmGroups  = $reachable | Group-Object { $_.Entry.vmName }
+$_firstEntry = ($reachable | Select-Object -First 1).Entry
+$_hostVmIp   = $_firstEntry.ipAddress
+$_hasRouter  = $_firstEntry.PSObject.Properties['_RouterVm'] -and `
+               $_firstEntry._RouterVm
+$vmGroups    = $reachable | Group-Object { $_.Entry.vmName }
 
-Invoke-WithVmFileServer -VmIpAddress $_hostVmIp -Port 8745 -ScriptBlock {
+$fileServerParams = @{ Port = 8745 }
+if ($_hasRouter) {
+    $fileServerParams['HostIp'] = Get-VmSwitchHostIp `
+                                      -VmIpAddress $_firstEntry._RouterVm.ipAddress
+} else {
+    $fileServerParams['VmIpAddress'] = $_hostVmIp
+}
+
+Invoke-WithVmFileServer @fileServerParams -ScriptBlock {
     param($server)
 
     # Stage the pre-fetched tarball once; all VMs download from the same URL.
@@ -162,18 +243,30 @@ Invoke-WithVmFileServer -VmIpAddress $_hostVmIp -Port 8745 -ScriptBlock {
         Write-Host ""
         Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
 
-        $sshClient = $null
+        # New-VmSshClientWithJump expects ipAddress/username/password on
+        # the supplied object, plus _RouterVm when a jump is needed.
+        # Runner entries carry deployUsername (not username), so we
+        # build a small adapter object rather than rename the Entry's
+        # field (which would ripple through Invoke-VmRunnerGroup and
+        # all its callers).
+        $vmShim = [PSCustomObject]@{
+            ipAddress = $ipAddress
+            username  = $username
+            password  = $password
+        }
+        if ($first.Entry.PSObject.Properties['_RouterVm'] -and `
+            $first.Entry._RouterVm) {
+            Add-Member -InputObject $vmShim -MemberType NoteProperty `
+                       -Name '_RouterVm' -Value $first.Entry._RouterVm -Force
+        }
+
+        $sshSession = $null
 
         try {
-            $auth      = [Renci.SshNet.PasswordAuthenticationMethod]::new(
-                             $username, $password)
-            $connInfo  = [Renci.SshNet.ConnectionInfo]::new(
-                             $ipAddress, $username, @($auth))
-            $sshClient = [Renci.SshNet.SshClient]::new($connInfo)
-            $sshClient.Connect()
+            $sshSession = New-VmSshClientWithJump -Vm $vmShim
 
             Invoke-VmRunnerGroup `
-                -SshClient     $sshClient `
+                -SshClient     $sshSession.Client `
                 -VmName        $vmName `
                 -Targets       $group.Group `
                 -RunnerVersion $runnerVersion `
@@ -184,9 +277,8 @@ Invoke-WithVmFileServer -VmIpAddress $_hostVmIp -Port 8745 -ScriptBlock {
             Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
         }
         finally {
-            if ($null -ne $sshClient) {
-                if ($sshClient.IsConnected) { $sshClient.Disconnect() }
-                $sshClient.Dispose()
+            if ($null -ne $sshSession) {
+                try { $sshSession.Dispose() } catch {}
             }
         }
     }

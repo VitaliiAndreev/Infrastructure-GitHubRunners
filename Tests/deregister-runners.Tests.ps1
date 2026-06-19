@@ -102,3 +102,41 @@ Describe 'deregister-runners.ps1 - suffix forwarding to vault helpers' {
         Test-ForwardsSecretSuffix -Call $call | Should -BeTrue
     }
 }
+
+
+Describe 'deregister-runners.ps1 - jump-host wiring (feature 53 NAT topology)' {
+
+    # Symmetric to register-runners.ps1's jump-host wiring. The down
+    # path opens an SSH session per reachable VM and does not run a
+    # host file server, so the Get-VmSwitchHostIp leg of the wiring
+    # is intentionally absent here.
+
+    It 'reads VmProvisionerConfig to locate the router row' {
+        $text = Get-Content -LiteralPath $script:scriptPath -Raw
+        $text | Should -Match 'VmProvisionerConfig-\$SecretSuffix'
+    }
+
+    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
+        $call = $script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Get-VmKvpIpAddress' } |
+            Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
+        $call = $script:commands |
+            Where-Object { $_.GetCommandName() -eq 'New-VmSshClientWithJump' } |
+            Select-Object -First 1
+        $call | Should -Not -BeNullOrEmpty
+    }
+
+    It 'stamps _RouterVm onto entries via Add-Member' {
+        $text = Get-Content -LiteralPath $script:scriptPath -Raw
+        $text | Should -Match "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
+    }
+
+    It 'no longer constructs Renci.SshNet.SshClient directly' {
+        $text = Get-Content -LiteralPath $script:scriptPath -Raw
+        $text | Should -Not -Match '\[Renci\.SshNet\.SshClient\]::new'
+    }
+}

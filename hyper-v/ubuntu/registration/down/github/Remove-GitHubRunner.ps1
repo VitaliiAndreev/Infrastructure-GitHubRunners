@@ -1,7 +1,7 @@
 <#
 .NOTES
     Do not run this file directly. It is intended to be dot-sourced by
-    deregister-runners.ps1 after PowerShell.Common is loaded.
+    deregister-runners.ps1 after Common.PowerShell is loaded.
 #>
 
 # ---------------------------------------------------------------------------
