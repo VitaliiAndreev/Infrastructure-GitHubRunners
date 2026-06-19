@@ -10,7 +10,6 @@ name: E2E
 # register-runners.ps1 would never be exercised on a PR.
 on:
   pull_request:
-    branches: [ master ]
 
 jobs:
   e2e:
