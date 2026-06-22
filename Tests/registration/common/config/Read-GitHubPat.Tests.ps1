@@ -1,3 +1,12 @@
+# The Read-Host mocks build a SecureString from a throwaway literal PAT to
+# exercise the prompt-and-convert path; no real secret is present, so the
+# plaintext-conversion rule does not apply. Suppressed file-wide here, it
+# stays live in production code.
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingConvertToSecureStringWithPlainText', '',
+    Justification = 'Test double converting a throwaway literal PAT, no real secret')]
+param()
+
 BeforeAll {
     . "$PSScriptRoot\..\..\..\..\hyper-v\ubuntu\registration\common\config\Read-GitHubPat.ps1"
 }

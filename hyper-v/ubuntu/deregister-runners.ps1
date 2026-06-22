@@ -30,6 +30,13 @@
     .\deregister-runners.ps1 -Force
 #>
 
+# Dispose() on an SSH session can throw on double-dispose or an already
+# dropped connection; the finally-block cleanup swallows that so it cannot
+# derail the surrounding teardown. Suppress the empty-catch rule file-wide
+# for that single best-effort site (the rule stays live elsewhere).
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingEmptyCatchBlock', '',
+    Justification = 'Dispose cleanup must not throw out of a finally block')]
 [CmdletBinding()]
 param(
     [switch] $Force,
