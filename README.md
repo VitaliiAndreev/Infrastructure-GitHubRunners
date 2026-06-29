@@ -207,7 +207,13 @@ while the runner roles, playbooks, and operator wrappers live here.
 | Roles | `roles/runner_entry_resolve`, `roles/runner_binary`, `roles/runner_registration`, `roles/runner_service` | Resolve a host's runner entries; cache/extract the tarball; reconcile GitHub registration; install the systemd unit |
 | Playbooks | `playbooks/register-runners.yml`, `playbooks/deregister-runners.yml`, `playbooks/runner-status.yml` (+ `playbooks/tasks/`) | Compose the roles per direction |
 | Wrappers | `ops/register-runners.sh`, `ops/deregister-runners.sh`, `ops/runner-status.sh` (+ `.bat`) | Operator entry points |
-| Domain helpers | `ops/_build-extra-vars-runners.sh`, `ops/_require-gh-token.sh`, `ops/_stage-runner-tarball.sh`, `ops/_resolve-runner-version.ps1`, `ops/_ensure-runner-tarball.ps1`, `ops/setup-runners-secrets.{ps1,bat}` | Runner-domain extra-vars, token acquisition, tarball staging, secrets surface |
+| Domain helpers | `ops/_build-extra-vars-runners.sh`, `ops/_require-gh-token.sh`, `ops/_stage-runner-tarball.sh`, `ops/_resolve-runner-version.ps1`, `ops/_ensure-runner-tarball.ps1` | Runner-domain extra-vars, token acquisition, tarball staging |
+
+The runner config secret is **not** Ansible-specific: both this Ansible flow
+and the PowerShell orchestrators read the same `GitHubRunnersConfig-<Suffix>`
+secret from the local SecretStore vault. It is written once by the shared
+`hyper-v/ubuntu/setup-secrets.ps1` (see [Quick start](#quick-start)), so there
+is no separate Ansible secrets entry point.
 
 ### Consuming Common-Ansible
 
@@ -228,6 +234,10 @@ declare the `VmProvisioner` inventory vault, the `GitHubRunners` vault on top
 of it, and the GitHub token requirement.
 
 ```bash
+# Store the runner config in the local vault once (shared with the
+# PowerShell flow; run from PowerShell).
+#   pwsh ./hyper-v/ubuntu/setup-secrets.ps1 -ConfigFile C:\private\runners-config.json -SecretSuffix Production
+
 # Bootstrap the controller once (reuses the Common-Ansible venv).
 ops/bootstrap-controller.sh        # or double-click ops\bootstrap-controller.bat
 
@@ -302,6 +312,16 @@ to LF and `*.bat` to CRLF - Linux CI runners reject CRLF shebangs.
 
 ## Repo structure
 
+This repo carries **two runner implementations** plus the secret store they
+share. The top-level directories group by that split:
+
+| Bucket | Directories |
+|---|---|
+| **PowerShell impl** | `hyper-v/` (orchestrators + per-step logic), `Tests/hyper-v/` |
+| **Ansible impl** (Common-Ansible consumer) | `roles/`, `playbooks/`, `ops/`, `requirements.yml`, `Tests/{ops,molecule,ansible}` |
+| **Shared** | the local SecretStore vault, set up by `hyper-v/ubuntu/setup-secrets.ps1` and read by both impls |
+| **Tooling** | `.github/`, `scripts/`, `.gitattributes`, `docs/` |
+
 ```
 .github/workflows/
   ci-yaml.yml                 Delegates to Common-Automation reusable ci-yaml.yml
@@ -316,7 +336,6 @@ ops/                          Ansible operator surface (Common-Ansible consumer)
   register-runners.sh / .bat        Register flow entry (pre-stages tarball, declares the CA_* contract)
   deregister-runners.sh / .bat      Deregister flow entry (--force clears unreachable VMs via the API)
   runner-status.sh                  Read-only UP/DOWN status report
-  setup-runners-secrets.ps1 / .bat  Operator surface delegating to hyper-v/ubuntu/setup-secrets.ps1
   bootstrap-controller.sh / .bat    Reuse the Common-Ansible controller venv
   _build-extra-vars-runners.sh      Runner-domain extra-vars fragment (consumed by the substrate composer)
   _stage-runner-tarball.sh          Resolve runner version + cache the tarball Windows-side
@@ -356,14 +375,14 @@ hyper-v/ubuntu/
       registration/           config.sh lifecycle (deregister)
       service/                Systemd service management (stop, uninstall)
       Invoke-VmDeregisterGroup.ps1  Per-VM orchestration (stop, deregister, remove)
-Tests/
-  registration/               Unit tests mirroring the production structure
-    common/
-    up/
-    down/
-  Integration/                Integration tests (require a live SSH target via Docker)
-  ops/                        Bats + Pester for the Ansible operator wrappers
-  molecule/                   Molecule scenarios per runner role (Docker driver)
-  ansible/                    Controller-only playbook smoke test + fixture inventory
+Tests/                        Split by impl, mirroring the production layout
+  hyper-v/                    PowerShell-impl tests (mirror hyper-v/)
+    registration/               Unit tests mirroring the production structure
+      common/  up/  down/
+    Integration.DockerTarget/   Integration tests (require a live SSH target via Docker)
+    register-runners.Tests.ps1  deregister-runners.Tests.ps1  setup-secrets.Tests.ps1
+  ops/                        Ansible-impl: bats + Pester for the operator wrappers
+  molecule/                   Ansible-impl: molecule scenarios per runner role (Docker driver)
+  ansible/                    Ansible-impl: controller-only playbook smoke test + fixture inventory
   mock-github-api.py          Shared mock GitHub API for the runner-side tests
 ```
