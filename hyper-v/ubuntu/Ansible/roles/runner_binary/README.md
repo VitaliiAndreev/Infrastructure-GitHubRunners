@@ -19,7 +19,7 @@ so `config.sh` exists on disk when the registration step looks for it.
 
 The role reads three extra-vars supplied by the bash bridge
 ([`ops/_build-extra-vars.sh`](../../ops/_build-extra-vars.sh) +
-`_build-extra-vars-runners.sh`):
+`_build-extra-vars-GitHubRunners.sh`):
 
 - `github_runners_config` - the verbatim `GitHubRunnersConfig-<Suffix>`
   JSON array. The host slice is derived by the

@@ -1,18 +1,19 @@
 #!/usr/bin/env bats
-# Tests for ops/_build-extra-vars-runners.sh - this repo's per-domain helper
-# emitting github_runners_config + github_token + host_file_server_base_url +
-# runner_version. Owns the token-non-empty fast-fail and the
-# shell-special-chars-verbatim contract since token hygiene is part of this
-# domain.
+# Tests for ops/_build-extra-vars-GitHubRunners.sh - this repo's per-domain
+# helper emitting github_runners_config + github_token +
+# host_file_server_base_url + runner_version. Owns the token-non-empty
+# fast-fail and the shell-special-chars-verbatim contract since token hygiene
+# is part of this domain. The vault config arrives on the generic --config
+# flag the substrate composer hands every per-domain helper.
 #
 # The fragment reaches the substrate's generic input gate and unknown-flag
 # handler through the Common-Ansible sibling checkout (the 3.1 consumption
 # path), so the suite points COMMON_ANSIBLE_ROOT at that sibling and skips
 # when it is absent (the consumption model requires it; CI checks it out
 # alongside).
-# Run with: bats Tests/ops/_build-extra-vars-runners.bats
+# Run with: bats Tests/ops/_build-extra-vars-GitHubRunners.bats
 
-SCRIPT="$(cd "${BATS_TEST_DIRNAME}/../../ops" && pwd)/_build-extra-vars-runners.sh"
+SCRIPT="$(cd "${BATS_TEST_DIRNAME}/../../ops" && pwd)/_build-extra-vars-GitHubRunners.sh"
 # The substrate sibling holds _validate-extra-vars-input.sh /
 # _die-on-unknown-flag.sh the fragment sources at runtime.
 SUBSTRATE_ROOT="$(cd "${BATS_TEST_DIRNAME}/../../../../../../Common-Ansible" 2>/dev/null && pwd || true)"
@@ -35,13 +36,13 @@ teardown() {
 }
 
 @test "fails with usage when either required flag is missing" {
-    # --runners-config and --github-token are mandatory; the file-server pair
+    # --config and --github-token are mandatory; the file-server pair
     # below is optional.
     run "${BASH_BIN}" "${SCRIPT}"
     [ "${status}" -eq 2 ]
     [[ "${output}" == *"usage:"* ]]
 
-    run "${BASH_BIN}" "${SCRIPT}" --runners-config "${RUNNERS}"
+    run "${BASH_BIN}" "${SCRIPT}" --config "${RUNNERS}"
     [ "${status}" -eq 2 ]
     [[ "${output}" == *"usage:"* ]]
 
@@ -53,7 +54,7 @@ teardown() {
 @test "rejects --host-base-url without --runner-version" {
     printf '%s' '[]' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "ghp_example" \
         --host-base-url "http://10.10.0.1:8745"
     [ "${status}" -eq 2 ]
@@ -63,7 +64,7 @@ teardown() {
 @test "rejects --runner-version without --host-base-url" {
     printf '%s' '[]' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "ghp_example" \
         --runner-version "2.999.0"
     [ "${status}" -eq 2 ]
@@ -79,7 +80,7 @@ teardown() {
 @test "fails fast when --github-token is the empty string" {
     printf '%s' '[]' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "" \
         --host-base-url "http://10.10.0.1:8745" \
         --runner-version "2.999.0"
@@ -91,7 +92,7 @@ teardown() {
 @test "fails fast when --host-base-url is the empty string" {
     printf '%s' '[]' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "ghp_example" \
         --host-base-url "" \
         --runner-version "2.999.0"
@@ -103,7 +104,7 @@ teardown() {
 @test "fails fast when --runner-version is the empty string" {
     printf '%s' '[]' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "ghp_example" \
         --host-base-url "http://10.10.0.1:8745" \
         --runner-version ""
@@ -114,31 +115,31 @@ teardown() {
 
 @test "fails with file path when the runners config is missing" {
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${TEST_TMP}/does-not-exist.json" \
+        --config "${TEST_TMP}/does-not-exist.json" \
         --github-token "ghp_example" \
         --host-base-url "http://10.10.0.1:8745" \
         --runner-version "2.999.0"
     [ "${status}" -ne 0 ]
-    [[ "${output}" == *"runners-config"* ]]
+    [[ "${output}" == *"config"* ]]
     [[ "${output}" == *"not found"* ]]
 }
 
 @test "fails when the runners config is not valid JSON" {
     printf '%s' 'not-json' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "ghp_example" \
         --host-base-url "http://10.10.0.1:8745" \
         --runner-version "2.999.0"
     [ "${status}" -ne 0 ]
-    [[ "${output}" == *"runners-config"* ]]
+    [[ "${output}" == *"config"* ]]
     [[ "${output}" == *"not valid JSON"* ]]
 }
 
 @test "valid inputs emit a four-key object when the file-server pair is supplied" {
     printf '%s' '[{"vmName":"a","runnerName":"r1"}]' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "ghp_example" \
         --host-base-url "http://10.10.0.1:8745" \
         --runner-version "2.999.0"
@@ -157,7 +158,7 @@ teardown() {
     # strings the down-direction roles would have to special-case.
     printf '%s' '[{"vmName":"a","runnerName":"r1"}]' > "${RUNNERS}"
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "ghp_example"
     [ "${status}" -eq 0 ]
 
@@ -174,7 +175,7 @@ teardown() {
     printf '%s' '[]' > "${RUNNERS}"
     weird_token='ghp_$VAR `cmd` "quoted" '"'"'apostrophe'"'"' & |'
     run "${BASH_BIN}" "${SCRIPT}" \
-        --runners-config "${RUNNERS}" \
+        --config "${RUNNERS}" \
         --github-token "${weird_token}" \
         --host-base-url "http://10.10.0.1:8745" \
         --runner-version "2.999.0"

@@ -213,7 +213,7 @@ below are relative to that slice.
 | Roles | `roles/runner_entry_resolve`, `roles/runner_binary`, `roles/runner_registration`, `roles/runner_service` | Resolve a host's runner entries; cache/extract the tarball; reconcile GitHub registration; install the systemd unit |
 | Playbooks | `playbooks/register-runners.yml`, `playbooks/deregister-runners.yml`, `playbooks/runner-status.yml` (+ `playbooks/tasks/`) | Compose the roles per direction |
 | Wrappers | `ops/register-runners.sh`, `ops/deregister-runners.sh`, `ops/runner-status.sh` (+ `.bat`) | Operator entry points |
-| Domain helpers | `ops/_build-extra-vars-runners.sh`, `ops/_require-gh-token.sh`, `ops/_stage-runner-tarball.sh`, `ops/_resolve-runner-version.ps1`, `ops/_ensure-runner-tarball.ps1` | Runner-domain extra-vars, token acquisition, tarball staging |
+| Domain helpers | `ops/_build-extra-vars-GitHubRunners.sh`, `ops/_require-gh-token.sh`, `ops/_stage-runner-tarball.sh`, `ops/_resolve-runner-version.ps1`, `ops/_ensure-runner-tarball.ps1` | Runner-domain extra-vars, token acquisition, tarball staging |
 
 The runner config secret is **not** Ansible-specific: both this Ansible flow
 and the PowerShell orchestrators read the same `GitHubRunnersConfig-<Suffix>`
@@ -235,7 +235,8 @@ Each wrapper declares this repo as the consumer through the bridge's `CA_*`
 contract: `CA_CONSUMER_ROOT` points the bridge at this repo so it runs *this*
 repo's playbook, prepends this repo's `roles/` to `ANSIBLE_ROLES_PATH` (the
 substrate `roles/` stays on the path for any reusable role), and resolves the
-`_build-extra-vars-runners.sh` fragment from `ops/` here. The wrappers also
+`_build-extra-vars-GitHubRunners.sh` fragment from `ops/` here (the composer
+derives that name from the declared `GitHubRunners` vault). The wrappers also
 declare the `VmProvisioner` inventory vault, the `GitHubRunners` vault on top
 of it, and the GitHub token requirement.
 
@@ -354,7 +355,7 @@ hyper-v/ubuntu/
       deregister-runners.sh / .bat    Deregister entry (--force clears unreachable VMs via the API)
       runner-status.sh                Read-only UP/DOWN status report
       bootstrap-controller.sh / .bat  Reuse the Common-Ansible controller venv
-      _build-extra-vars-runners.sh    Runner-domain extra-vars fragment
+      _build-extra-vars-GitHubRunners.sh  Runner-domain extra-vars fragment
       _stage-runner-tarball.sh        Resolve runner version + cache the tarball Windows-side
       _require-gh-token.sh            GitHub PAT acquisition (per-invocation, never vaulted)
       _resolve-runner-version.ps1  _ensure-runner-tarball.ps1   Runner version/tarball helpers

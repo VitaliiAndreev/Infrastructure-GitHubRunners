@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Per-domain extra-vars helper: runners. Owned by Infrastructure-GitHubRunners
 # (the runner domain's home) and consumed by the Common-Ansible substrate
-# composer (ops/_build-extra-vars.sh), which - when this repo declares
-# CA_CONSUMER_ROOT - dispatches the GitHubRunners vault to this fragment from
-# <consumer-root>/ops rather than from the substrate.
+# composer (ops/_build-extra-vars.sh). The composer derives this helper by the
+# generic _build-extra-vars-<Name>.sh convention from the declared GitHubRunners
+# vault and - because this repo declares CA_CONSUMER_ROOT - resolves it from
+# <consumer-root>/ops rather than from the substrate. The vault's config path
+# arrives on the generic --config flag the composer hands every per-domain
+# helper; the optional --github-token / --host-base-url / --runner-version are
+# the cross-cutting inputs the composer forwards when supplied.
 #
 # Emits the runners-domain keys consumed by the runner_binary /
 # runner_registration / runner_service roles. Opt-in: dispatched by the
@@ -61,13 +65,13 @@ runner_version=""
 runner_version_set=0
 
 usage() {
-    echo "usage: _build-extra-vars-runners.sh --runners-config <path> --github-token <value>" \
+    echo "usage: _build-extra-vars-GitHubRunners.sh --config <path> --github-token <value>" \
          "[--host-base-url <url> --runner-version <ver>]" >&2
 }
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --runners-config)
+        --config)
             runners_path="${2:-}"
             shift 2 || true
             ;;
@@ -124,7 +128,7 @@ if [[ "${runner_version_set}" -eq 1 && -z "${runner_version}" ]]; then
     exit 2
 fi
 
-_validate_extra_vars_input --runners-config "${runners_path}"
+_validate_extra_vars_input --config "${runners_path}"
 
 # Build the object in two steps so the file-server pair is genuinely absent
 # (not present-as-empty-string) when the caller omits it.
