@@ -27,16 +27,16 @@
 
 set -euo pipefail
 
-# shellcheck source=ops/imports/_log.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_log.sh
 source "${BASH_SOURCE[0]%/*}/imports/_log.sh"
 # _to_windows_path (shared from Common-Automation) turns the sibling .ps1
 # paths into the Windows form pwsh.exe needs. The imports/ adapter owns the
 # cross-repo resolution.
-# shellcheck source=ops/imports/_to-windows-path.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_to-windows-path.sh
 source "${BASH_SOURCE[0]%/*}/imports/_to-windows-path.sh"
 # Generic unknown-flag handler lives in the substrate; reach it through the
 # 3.1 sibling-checkout resolver rather than duplicating it here.
-# shellcheck source=ops/imports/_common-ansible-root.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_common-ansible-root.sh
 source "${BASH_SOURCE[0]%/*}/imports/_common-ansible-root.sh"
 # shellcheck source=/dev/null
 source "${common_ansible_root}/ops/_die-on-unknown-flag.sh"

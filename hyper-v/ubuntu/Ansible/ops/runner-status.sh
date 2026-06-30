@@ -21,11 +21,11 @@ script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # the playbook, roles, and fragment from.
 CA_CONSUMER_ROOT="$(cd "${script_dir}/.." && pwd)"
 
-# shellcheck source=ops/imports/_log.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_log.sh
 source "${script_dir}/imports/_log.sh"
-# shellcheck source=ops/_require-gh-token.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/_require-gh-token.sh
 source "${script_dir}/_require-gh-token.sh"
-# shellcheck source=ops/imports/_common-ansible-root.sh
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_common-ansible-root.sh
 source "${script_dir}/imports/_common-ansible-root.sh"
 
 require_gh_token
