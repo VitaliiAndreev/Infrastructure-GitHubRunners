@@ -4,10 +4,13 @@ name: Infrastructure-E2E
 # Always runs the full lifecycle layer - a runners change can cascade to break
 # user setup or provisioning, so the full stack must be verified.
 #
-# This repo owns the custom-powershell runners implementation, so it pins the
-# custom-powershell scenario (both layers) via flow-spec. Without it the
-# shared workflow defaults to the ansible scenario and this repo's
-# register-runners.ps1 would never be exercised on a PR.
+# Pins runnersFlow=ansible so this repo's PR exercises its Ansible runner flow
+# (register-runners.sh / deregister-runners.sh / runner-status.sh on the
+# Common-Ansible substrate); that flow needs WslDistro in the E2EConfig vault.
+# usersFlow is also ansible - the user owner's check exercises that flow - so a
+# runner PR runs the full Ansible stack with the runner flow as the variable
+# under test. This pin does not cover the PowerShell register-runners.ps1 path -
+# use an explicit override or a matrix for that.
 on:
   pull_request:
 
@@ -16,4 +19,4 @@ jobs:
     uses: Klark-Morrigan/Infrastructure-E2E/.github/workflows/e2e.yml@master
     secrets: inherit
     with:
-      flow-spec: '{"usersFlow":"custom-powershell","runnersFlow":"custom-powershell"}'
+      flow-spec: '{"usersFlow":"ansible","runnersFlow":"ansible"}'
