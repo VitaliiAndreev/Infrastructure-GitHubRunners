@@ -228,8 +228,9 @@ under the same parent directory; override with `COMMON_ANSIBLE_ROOT`). The
 roles are not standalone - they read the bridge's extra-vars/inventory
 contract - so roles and bridge are one substrate, taken together through one
 checkout. `ops/imports/_common-ansible-root.sh` resolves that root once;
-`ops/bootstrap-controller.sh` reuses the substrate's controller venv rather
-than building its own.
+`ops/bootstrap-controller.sh` is a thin shim over the substrate's shared
+consumer bootstrap (`ops/bootstrap-controller-consumer.sh`), reusing the
+controller venv rather than building its own.
 
 Each wrapper declares this repo as the consumer through the bridge's `CA_*`
 contract: `CA_CONSUMER_ROOT` points the bridge at this repo so it runs *this*
