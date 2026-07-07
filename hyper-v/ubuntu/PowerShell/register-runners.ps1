@@ -90,203 +90,260 @@ if (-not $Token) {
 }
 
 # ---------------------------------------------------------------------------
-# Read configs from vaults
+# Phase-timing setup
+#   Initialize-PhaseTimings / Invoke-WithPhaseTimer /
+#   Export-PhaseTimingTreeIfRequested are the 2-level compat shims exported by
+#   Common.PowerShell (imported by Install-ModuleDependencies above). Declare
+#   the stages in run order so the emitted tree lists each one - even a stage
+#   that never ran because an earlier one failed. The stages run inside
+#   Invoke-WithPhaseTimer wrappers; the outer try/finally calls the
+#   self-guarding Export-PhaseTimingTreeIfRequested shim, which serialises the
+#   tree only when the TIMING_TREE_OUTPUT_PATH opt-in is set so the E2E parent
+#   can graft this run's timings under the runner-registration part that
+#   shelled out here. Unset, behaviour is unchanged (no file, no extra output).
 # ---------------------------------------------------------------------------
 
-$runnerEntries   = Read-GitHubRunnersConfig -SecretSuffix $SecretSuffix
-$deployPasswords = Read-VmDeployPasswords    -SecretSuffix $SecretSuffix
+Initialize-PhaseTimings -Phases @(
+    'Read configs + resolve router IP',
+    'Match + probe reachable VMs',
+    'Resolve + prefetch runner tarball',
+    'Install + register runners'
+)
 
-# ---------------------------------------------------------------------------
-# Router-VM resolution (feature-53 NAT topology)
-#   Read VmProvisionerConfig to find the router row (kind == 'router'),
-#   discover its upstream IP via Hyper-V KVP when absent, and stamp it as
-#   _RouterVm on every runner entry sharing the router's privateSwitchName.
-#   New-VmSshClientWithJump downstream uses that property to decide
-#   direct-vs-jumped session per VM without callers having to thread the
-#   router VM explicitly. When no router row is present the topology
-#   predates feature 53 - every workload keeps the legacy direct path.
-#
-#   Symmetric with the same resolution block in create-users.ps1 /
-#   remove-users.ps1.
-# ---------------------------------------------------------------------------
+try {
 
-$provisionerJson = Get-InfrastructureSecret `
-                       -VaultName  'VmProvisioner' `
-                       -SecretName "VmProvisionerConfig-$SecretSuffix"
-$provisionerVms  = @($provisionerJson | ConvertFrom-Json)
+    Invoke-WithPhaseTimer -Name 'Read configs + resolve router IP' -Action {
 
-$routerVm = $provisionerVms | Where-Object {
-    $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
-} | Select-Object -First 1
+        # -------------------------------------------------------------------
+        # Read configs from vaults
+        # -------------------------------------------------------------------
 
-if ($null -ne $routerVm) {
-    Import-Module Hyper-V -ErrorAction Stop
+        # $script:-scoped because Invoke-WithPhaseTimer runs -Action in a child
+        # scope; a bare assignment would not survive to the next phase. The
+        # later phases read these, so they must land in the script scope.
+        $script:runnerEntries   = Read-GitHubRunnersConfig -SecretSuffix $SecretSuffix
+        $script:deployPasswords = Read-VmDeployPasswords    -SecretSuffix $SecretSuffix
 
-    # Static-mode routers (externalDhcp = false) keep their ipAddress in
-    # the vault; DHCP-mode routers (the schema default) carry it only in
-    # Hyper-V KVP. Discover on demand so both modes work without
-    # forking the call site.
-    if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
-        Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
-            -NoNewline -ForegroundColor Cyan
-        $routerIp = Get-VmKvpIpAddress `
-                        -VmName     $routerVm.vmName `
-                        -SwitchName $routerVm.externalSwitchName `
-                        -OnPoll     { Write-Host '.' -NoNewline -ForegroundColor Cyan }
-        Add-Member -InputObject $routerVm -MemberType NoteProperty `
-                   -Name 'ipAddress' -Value $routerIp -Force
-        Write-Host " $routerIp" -ForegroundColor Green
-    }
+        # -------------------------------------------------------------------
+        # Router-VM resolution (feature-53 NAT topology)
+        #   Read VmProvisionerConfig to find the router row (kind == 'router'),
+        #   discover its upstream IP via Hyper-V KVP when absent, and stamp it
+        #   as _RouterVm on every runner entry sharing the router's
+        #   privateSwitchName. New-VmSshClientWithJump downstream uses that
+        #   property to decide direct-vs-jumped session per VM without callers
+        #   having to thread the router VM explicitly. When no router row is
+        #   present the topology predates feature 53 - every workload keeps the
+        #   legacy direct path.
+        #
+        #   Symmetric with the same resolution block in create-users.ps1 /
+        #   remove-users.ps1.
+        # -------------------------------------------------------------------
 
-    # Stamp _RouterVm on each runner entry whose corresponding
-    # provisioner row sits on the router's privateSwitchName. Match by
-    # vmName since runner entries do not carry switch fields
-    # themselves.
-    $provisionerIndex = @{}
-    foreach ($vm in $provisionerVms) {
-        $provisionerIndex[$vm.vmName] = $vm
-    }
-    foreach ($entry in $runnerEntries) {
-        if (-not $provisionerIndex.ContainsKey($entry.vmName)) { continue }
-        $provVm   = $provisionerIndex[$entry.vmName]
-        $isRouter = $provVm.PSObject.Properties['kind'] -and `
-                    $provVm.kind -eq 'router'
-        if ($isRouter) { continue }
-        $sameEnv  = $provVm.PSObject.Properties['privateSwitchName'] -and `
-                    $provVm.privateSwitchName -eq $routerVm.privateSwitchName
-        if (-not $sameEnv) { continue }
+        $provisionerJson = Get-InfrastructureSecret `
+                               -VaultName  'VmProvisioner' `
+                               -SecretName "VmProvisionerConfig-$SecretSuffix"
+        $provisionerVms  = @($provisionerJson | ConvertFrom-Json)
 
-        Add-Member -InputObject $entry -MemberType NoteProperty `
-                   -Name '_RouterVm' -Value $routerVm -Force
-    }
-}
+        $routerVm = $provisionerVms | Where-Object {
+            $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
+        } | Select-Object -First 1
 
-# ---------------------------------------------------------------------------
-# Join runner entries to deploy credentials
-#    Entries with no matching password in VmUsers vault are warned and
-#    skipped - they likely reference a user not yet created by
-#    Infrastructure-Vm-Users.
-# ---------------------------------------------------------------------------
+        if ($null -ne $routerVm) {
+            Import-Module Hyper-V -ErrorAction Stop
 
-$targets = Join-RunnerDeployCredentials `
-    -RunnerEntries   $runnerEntries `
-    -DeployPasswords $deployPasswords
+            # Static-mode routers (externalDhcp = false) keep their ipAddress in
+            # the vault; DHCP-mode routers (the schema default) carry it only in
+            # Hyper-V KVP. Discover on demand so both modes work without
+            # forking the call site.
+            if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
+                Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
+                    -NoNewline -ForegroundColor Cyan
+                $routerIp = Get-VmKvpIpAddress `
+                                -VmName     $routerVm.vmName `
+                                -SwitchName $routerVm.externalSwitchName `
+                                -OnPoll     { Write-Host '.' -NoNewline -ForegroundColor Cyan }
+                Add-Member -InputObject $routerVm -MemberType NoteProperty `
+                           -Name 'ipAddress' -Value $routerIp -Force
+                Write-Host " $routerIp" -ForegroundColor Green
+            }
 
-# ---------------------------------------------------------------------------
-# Ping each matched VM
-# ---------------------------------------------------------------------------
+            # Stamp _RouterVm on each runner entry whose corresponding
+            # provisioner row sits on the router's privateSwitchName. Match by
+            # vmName since runner entries do not carry switch fields
+            # themselves.
+            $provisionerIndex = @{}
+            foreach ($vm in $provisionerVms) {
+                $provisionerIndex[$vm.vmName] = $vm
+            }
+            foreach ($entry in $script:runnerEntries) {
+                if (-not $provisionerIndex.ContainsKey($entry.vmName)) { continue }
+                $provVm   = $provisionerIndex[$entry.vmName]
+                $isRouter = $provVm.PSObject.Properties['kind'] -and `
+                            $provVm.kind -eq 'router'
+                if ($isRouter) { continue }
+                $sameEnv  = $provVm.PSObject.Properties['privateSwitchName'] -and `
+                            $provVm.privateSwitchName -eq $routerVm.privateSwitchName
+                if (-not $sameEnv) { continue }
 
-$reachable = Test-RunnerVmConnectivity -Targets $targets
-
-# ---------------------------------------------------------------------------
-# Resolve the latest runner version once - all VMs receive the same binary.
-# ---------------------------------------------------------------------------
-
-$runnerVersion = Resolve-RunnerVersion -Token $token
-
-# ---------------------------------------------------------------------------
-# Prefetch the runner tarball to the Windows host cache
-#   The tarball is later served to each VM by the host file server, bypassing
-#   the Hyper-V NAT bottleneck (~116 KB/s for in-VM curl from GitHub).
-# ---------------------------------------------------------------------------
-
-$_tarLocalPath = Invoke-RunnerTarballEnsure `
-    -RunnerVersion $runnerVersion `
-    -CacheDir      (Join-Path $env:TEMP 'runner-cache')
-
-# ---------------------------------------------------------------------------
-# Install runner binary and register each runner via SSH
-#   The file server runs for the duration of all VM installs and is stopped
-#   in a finally block by Invoke-WithVmFileServer regardless of errors.
-#
-#   File-server binding decision:
-#     - No router (legacy / pre-feature-53): bind on the host adapter
-#       sharing the runner VM's /24. Invoke-WithVmFileServer's
-#       -VmIpAddress path calls Get-VmSwitchHostIp on it.
-#     - With router (feature-53 NAT): the runner VM lives on a private
-#       switch the host has no route to, so binding by its IP throws
-#       "No host adapter found". Resolve the host adapter on the
-#       router's UPSTREAM LAN instead and pass -HostIp explicitly;
-#       runners reach the listener via their default route -> router
-#       priv0 -> router MASQUERADE on ext0 -> host.
-#
-#   Group reachable entries by VM so one SSH connection handles all runners
-#   on a host. Open the connection as the deploy user - admin credentials
-#   are not used or stored in this repo (see plan.md prerequisites).
-#
-#   Security: deployPassword must never appear in SSH commands, console
-#   output, or error messages. Log only vmName and deployUsername.
-#   Registration tokens are treated with the same care.
-# ---------------------------------------------------------------------------
-
-$_firstEntry = ($reachable | Select-Object -First 1).Entry
-$_hostVmIp   = $_firstEntry.ipAddress
-$_hasRouter  = $_firstEntry.PSObject.Properties['_RouterVm'] -and `
-               $_firstEntry._RouterVm
-$vmGroups    = $reachable | Group-Object { $_.Entry.vmName }
-
-$fileServerParams = @{ Port = 8745 }
-if ($_hasRouter) {
-    $fileServerParams['HostIp'] = Get-VmSwitchHostIp `
-                                      -VmIpAddress $_firstEntry._RouterVm.ipAddress
-} else {
-    $fileServerParams['VmIpAddress'] = $_hostVmIp
-}
-
-Invoke-WithVmFileServer @fileServerParams -ScriptBlock {
-    param($server)
-
-    # Stage the pre-fetched tarball once; all VMs download from the same URL.
-    $null = Add-VmFileServerFile -Server $server -LocalPath $_tarLocalPath
-
-    foreach ($group in $vmGroups) {
-        $first     = $group.Group[0]
-        $vmName    = $first.Entry.vmName
-        $ipAddress = $first.Entry.ipAddress
-        $username  = $first.Entry.deployUsername
-        # Plain string - see resolve\Read-VmDeployPasswords.ps1 for rationale.
-        $password  = $first.Password
-
-        Write-Host ""
-        Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
-
-        # New-VmSshClientWithJump expects ipAddress/username/password on
-        # the supplied object, plus _RouterVm when a jump is needed.
-        # Runner entries carry deployUsername (not username), so we
-        # build a small adapter object rather than rename the Entry's
-        # field (which would ripple through Invoke-VmRunnerGroup and
-        # all its callers).
-        $vmShim = [PSCustomObject]@{
-            ipAddress = $ipAddress
-            username  = $username
-            password  = $password
-        }
-        if ($first.Entry.PSObject.Properties['_RouterVm'] -and `
-            $first.Entry._RouterVm) {
-            Add-Member -InputObject $vmShim -MemberType NoteProperty `
-                       -Name '_RouterVm' -Value $first.Entry._RouterVm -Force
-        }
-
-        $sshSession = $null
-
-        try {
-            $sshSession = New-VmSshClientWithJump -Vm $vmShim
-
-            Invoke-VmRunnerGroup `
-                -SshClient     $sshSession.Client `
-                -VmName        $vmName `
-                -Targets       $group.Group `
-                -RunnerVersion $runnerVersion `
-                -Token         $token `
-                -HostBaseUrl   $server.BaseUrl
-        }
-        catch [Renci.SshNet.Common.SshConnectionException] {
-            Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
-        }
-        finally {
-            if ($null -ne $sshSession) {
-                try { $sshSession.Dispose() } catch {}
+                Add-Member -InputObject $entry -MemberType NoteProperty `
+                           -Name '_RouterVm' -Value $routerVm -Force
             }
         }
     }
+
+    Invoke-WithPhaseTimer -Name 'Match + probe reachable VMs' -Action {
+
+        # -------------------------------------------------------------------
+        # Join runner entries to deploy credentials
+        #    Entries with no matching password in VmUsers vault are warned and
+        #    skipped - they likely reference a user not yet created by
+        #    Infrastructure-Vm-Users.
+        # -------------------------------------------------------------------
+
+        $targets = Join-RunnerDeployCredentials `
+            -RunnerEntries   $script:runnerEntries `
+            -DeployPasswords $script:deployPasswords
+
+        # -------------------------------------------------------------------
+        # Ping each matched VM
+        # -------------------------------------------------------------------
+
+        # $script:-scoped for the install phase below (child-scope survival).
+        $script:reachable = Test-RunnerVmConnectivity -Targets $targets
+    }
+
+    Invoke-WithPhaseTimer -Name 'Resolve + prefetch runner tarball' -Action {
+
+        # -------------------------------------------------------------------
+        # Resolve the latest runner version once - all VMs receive the same
+        # binary - then prefetch the tarball to the Windows host cache. The
+        # tarball is later served to each VM by the host file server,
+        # bypassing the Hyper-V NAT bottleneck (~116 KB/s for in-VM curl from
+        # GitHub). Both land in the script scope for the install phase below.
+        # -------------------------------------------------------------------
+
+        $script:runnerVersion     = Resolve-RunnerVersion -Token $token
+        $script:runnerTarballPath = Invoke-RunnerTarballEnsure `
+            -RunnerVersion $script:runnerVersion `
+            -CacheDir      (Join-Path $env:TEMP 'runner-cache')
+    }
+
+    Invoke-WithPhaseTimer -Name 'Install + register runners' -Action {
+
+        # -------------------------------------------------------------------
+        # Install runner binary and register each runner via SSH
+        #   The file server runs for the duration of all VM installs and is
+        #   stopped in a finally block by Invoke-WithVmFileServer regardless of
+        #   errors.
+        #
+        #   File-server binding decision:
+        #     - No router (legacy / pre-feature-53): bind on the host adapter
+        #       sharing the runner VM's /24. Invoke-WithVmFileServer's
+        #       -VmIpAddress path calls Get-VmSwitchHostIp on it.
+        #     - With router (feature-53 NAT): the runner VM lives on a private
+        #       switch the host has no route to, so binding by its IP throws
+        #       "No host adapter found". Resolve the host adapter on the
+        #       router's UPSTREAM LAN instead and pass -HostIp explicitly;
+        #       runners reach the listener via their default route -> router
+        #       priv0 -> router MASQUERADE on ext0 -> host.
+        #
+        #   Group reachable entries by VM so one SSH connection handles all
+        #   runners on a host. Open the connection as the deploy user - admin
+        #   credentials are not used or stored in this repo (see plan.md
+        #   prerequisites).
+        #
+        #   Security: deployPassword must never appear in SSH commands, console
+        #   output, or error messages. Log only vmName and deployUsername.
+        #   Registration tokens are treated with the same care.
+        # -------------------------------------------------------------------
+
+        # Local aliases over the script-scoped cross-phase values so the
+        # install logic below (and the nested file-server scriptblock's
+        # closure) reads exactly as it did before the phase wrapping.
+        $reachable     = $script:reachable
+        $runnerVersion = $script:runnerVersion
+        $_tarLocalPath = $script:runnerTarballPath
+
+        $_firstEntry = ($reachable | Select-Object -First 1).Entry
+        $_hostVmIp   = $_firstEntry.ipAddress
+        $_hasRouter  = $_firstEntry.PSObject.Properties['_RouterVm'] -and `
+                       $_firstEntry._RouterVm
+        $vmGroups    = $reachable | Group-Object { $_.Entry.vmName }
+
+        $fileServerParams = @{ Port = 8745 }
+        if ($_hasRouter) {
+            $fileServerParams['HostIp'] = Get-VmSwitchHostIp `
+                                              -VmIpAddress $_firstEntry._RouterVm.ipAddress
+        } else {
+            $fileServerParams['VmIpAddress'] = $_hostVmIp
+        }
+
+        Invoke-WithVmFileServer @fileServerParams -ScriptBlock {
+            param($server)
+
+            # Stage the pre-fetched tarball once; all VMs download from the same URL.
+            $null = Add-VmFileServerFile -Server $server -LocalPath $_tarLocalPath
+
+            foreach ($group in $vmGroups) {
+                $first     = $group.Group[0]
+                $vmName    = $first.Entry.vmName
+                $ipAddress = $first.Entry.ipAddress
+                $username  = $first.Entry.deployUsername
+                # Plain string - see resolve\Read-VmDeployPasswords.ps1 for rationale.
+                $password  = $first.Password
+
+                Write-Host ""
+                Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
+
+                # New-VmSshClientWithJump expects ipAddress/username/password on
+                # the supplied object, plus _RouterVm when a jump is needed.
+                # Runner entries carry deployUsername (not username), so we
+                # build a small adapter object rather than rename the Entry's
+                # field (which would ripple through Invoke-VmRunnerGroup and
+                # all its callers).
+                $vmShim = [PSCustomObject]@{
+                    ipAddress = $ipAddress
+                    username  = $username
+                    password  = $password
+                }
+                if ($first.Entry.PSObject.Properties['_RouterVm'] -and `
+                    $first.Entry._RouterVm) {
+                    Add-Member -InputObject $vmShim -MemberType NoteProperty `
+                               -Name '_RouterVm' -Value $first.Entry._RouterVm -Force
+                }
+
+                $sshSession = $null
+
+                try {
+                    $sshSession = New-VmSshClientWithJump -Vm $vmShim
+
+                    Invoke-VmRunnerGroup `
+                        -SshClient     $sshSession.Client `
+                        -VmName        $vmName `
+                        -Targets       $group.Group `
+                        -RunnerVersion $runnerVersion `
+                        -Token         $token `
+                        -HostBaseUrl   $server.BaseUrl
+                }
+                catch [Renci.SshNet.Common.SshConnectionException] {
+                    Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
+                }
+                finally {
+                    if ($null -ne $sshSession) {
+                        try { $sshSession.Dispose() } catch {}
+                    }
+                }
+            }
+        }
+    }
+}
+finally {
+    # Cross-process handoff (opt-in). When a parent orchestrator (the E2E
+    # runner) sets TIMING_TREE_OUTPUT_PATH, the shim serialises the phase tree
+    # to that path so the parent can graft this run's timings under the
+    # runner-registration part that shelled out here. The shim owns the env-var
+    # name and the guard, so this stays one call: it fires on success AND
+    # failure, and no-ops when the var is unset or timings were never
+    # initialised (no file written).
+    Export-PhaseTimingTreeIfRequested
 }

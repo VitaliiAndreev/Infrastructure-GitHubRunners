@@ -14,6 +14,7 @@ provisioned by
 - [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
 - [Idempotency](#idempotency)
 - [Deregistration](#deregistration)
+- [Timing instrumentation (E2E opt-in)](#timing-instrumentation-e2e-opt-in)
 - [Ansible runner flow (Common-Ansible substrate)](#ansible-runner-flow-common-ansible-substrate)
 - [CI and linting](#ci-and-linting)
 - [Repo structure](#repo-structure)
@@ -29,7 +30,9 @@ PowerShell 7+ (`pwsh`).
 ## Prerequisites
 
 - Windows host with Hyper-V and PowerShell 7+.
-- `Common.PowerShell` >= `3.1.0` installed from PSGallery.
+- `Common.PowerShell` >= `9.3.0` installed from PSGallery (auto-installed by
+  the shared module bootstrap; supplies the phase-timing shims the
+  orchestrators use, see [Timing instrumentation](#timing-instrumentation-e2e-opt-in)).
 - VMs provisioned by **Infrastructure-Vm-Provisioner** and reachable.
 - A deploy user and a runner service user created on each VM by
   **Infrastructure-Vm-Users** before running this script (named in the
@@ -191,6 +194,32 @@ repos, `public_repo` for public).
 Re-running `deregister-runners.ps1` is safe: resources already removed on
 GitHub (404) are treated as success, stopped services and absent unit files
 are silently skipped, and absent runner directories are ignored.
+
+---
+
+## Timing instrumentation (E2E opt-in)
+
+Both orchestrators time their stages through the `Common.PowerShell`
+phase-timing shims and can hand the resulting tree to a parent process for a
+whole-run breakdown. Registration times four stages - read configs + resolve
+router IP, match + probe reachable VMs, resolve + prefetch runner tarball, and
+install + register runners; deregistration times three (it has no tarball
+prefetch) - read configs + resolve router IP, match + probe reachable VMs, and
+deregister runners.
+
+The handoff is strictly opt-in and off by default:
+
+- **Unset** (the normal operator run): behaviour is unchanged. Nothing extra is
+  written and console output is identical to before.
+- **Set** `TIMING_TREE_OUTPUT_PATH` to a file path: each script serialises its
+  phase tree to that path in its outer `finally` - on success **and** failure -
+  so the caller can graft this run's timings under the runner part that shelled
+  out to it. This is how **Infrastructure-E2E** turns an opaque "register
+  runners" part into its per-stage breakdown.
+
+The variable name is a neutral cross-process contract owned by the
+`Export-PhaseTimingTreeIfRequested` shim, not by this repo; the scripts never
+name a test framework.
 
 ---
 

@@ -39,6 +39,32 @@ BeforeAll {
         }
         return $false
     }
+
+    # Returns the string literal bound to -Name on an Invoke-WithPhaseTimer
+    # call, or $null when it is not a bare string literal. Collects the declared
+    # phase names in source order.
+    function Get-PhaseTimerName {
+        param([System.Management.Automation.Language.CommandAst] $Call)
+        for ($i = 1; $i -lt $Call.CommandElements.Count - 1; $i++) {
+            $cur  = $Call.CommandElements[$i]
+            $next = $Call.CommandElements[$i + 1]
+            if ($cur -is [System.Management.Automation.Language.CommandParameterAst] -and
+                $cur.ParameterName -eq 'Name' -and
+                $next -is [System.Management.Automation.Language.StringConstantExpressionAst]) {
+                return $next.Value
+            }
+        }
+        return $null
+    }
+
+    # The phases deregister-runners.ps1 declares, in dispatch order. The down
+    # path has no tarball prefetch, so it times three stages to the up path's
+    # four. Pinned so a rename reshaping the E2E graft (C2) fails loudly.
+    $script:expectedPhases = @(
+        'Read configs + resolve router IP',
+        'Match + probe reachable VMs',
+        'Deregister runners'
+    )
 }
 
 Describe 'deregister-runners.ps1 - SecretSuffix parameter contract' {
@@ -138,5 +164,59 @@ Describe 'deregister-runners.ps1 - jump-host wiring (feature 53 NAT topology)' {
     It 'no longer constructs Renci.SshNet.SshClient directly' {
         $text = Get-Content -LiteralPath $script:scriptPath -Raw
         $text | Should -Not -Match '\[Renci\.SshNet\.SshClient\]::new'
+    }
+}
+
+
+Describe 'deregister-runners.ps1 - phase-timing instrumentation (feature 88 D3)' {
+
+    # Mirror of register-runners.ps1's wiring for the down direction. The
+    # emitter declares its stages via Initialize-PhaseTimings, times each with
+    # Invoke-WithPhaseTimer, and hands the tree to a parent orchestrator on the
+    # TIMING_TREE_OUTPUT_PATH opt-in via Export-PhaseTimingTreeIfRequested.
+
+    It 'declares its stages once via Initialize-PhaseTimings' {
+        $calls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Initialize-PhaseTimings' })
+        $calls.Count | Should -Be 1
+    }
+
+    It 'times every declared stage with Invoke-WithPhaseTimer, in order' {
+        $timerCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-WithPhaseTimer' })
+        $names = @($timerCalls | ForEach-Object { Get-PhaseTimerName -Call $_ })
+        $names | Should -Be $script:expectedPhases
+    }
+
+    It 'exports the tree via the self-guarding opt-in shim exactly once' {
+        $calls = @($script:commands | Where-Object {
+            $_.GetCommandName() -eq 'Export-PhaseTimingTreeIfRequested'
+        })
+        $calls.Count | Should -Be 1
+    }
+
+    It 'does not call the mandatory-path Export-PhaseTimingTree directly' {
+        $calls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Export-PhaseTimingTree' })
+        $calls.Count | Should -Be 0
+    }
+
+    It 'does not hand-write the TIMING_TREE_OUTPUT_PATH env-var guard' {
+        # Only the $env: read is forbidden; a comment naming the contract
+        # variable is fine (the shim owns the guard and the env read).
+        $text = Get-Content -LiteralPath $script:scriptPath -Raw
+        $text | Should -Not -Match '\$env:TIMING_TREE_OUTPUT_PATH'
+    }
+}
+
+Describe 'deregister-runners.ps1 - Common.PowerShell floor' {
+
+    It 'raises the Common.PowerShell floor to the Export-PhaseTimingTreeIfRequested release (>= 9.3.0)' {
+        # The shim deregister-runners.ps1 calls ships in Common.PowerShell 9.3.0;
+        # the bootstrap floor must stay >= that so the import resolves it.
+        $depsPath = Join-Path (Split-Path $script:scriptPath -Parent) `
+            '..\shared\Install-ModuleDependencies.ps1'
+        $depsText = Get-Content -Path $depsPath -Raw
+        $depsText | Should -Match "MinimumVersion '(9\.(?:[3-9]|\d\d+)\.\d+|[1-9]\d+\.\d+\.\d+)'"
     }
 }
