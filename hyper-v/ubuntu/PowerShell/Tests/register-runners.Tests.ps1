@@ -1,26 +1,30 @@
 <#
 .SYNOPSIS
-    Structural wiring checks for register-runners.ps1.
+    Structural wiring checks for the thin register-runners.ps1 entry script.
 
 .DESCRIPTION
-    register-runners.ps1 has top-level side effects (module install/
-    import, two helper-driven vault reads, SSH connect loop) that
-    make it impractical to dot-source from a test. These tests parse
-    the file via AST and assert the parts of the SecretSuffix contract
-    that would otherwise silently regress:
+    After feature 88 D3-C, register-runners.ps1 is a thin entry point: it
+    bootstraps modules, dot-sources its registration-direction helpers plus the
+    shared orchestrator, and makes a single call to Invoke-RunnerReconcileRun
+    with the registration operation phases and a -Body that joins credentials,
+    probes reachability, prefetches the tarball, and installs/registers each
+    runner. All the shared opening (the two vault reads, the router resolution,
+    the phase-timing setup, and the timing export) moved into the orchestrator,
+    which is behaviourally tested under
+    registration/common/Invoke-RunnerReconcileRun.Tests.ps1.
 
-      - $SecretSuffix is a Mandatory + ValidateNotNullOrEmpty script
-        parameter.
-      - Both vault-reading helpers (Read-GitHubRunnersConfig and
-        Read-VmDeployPasswords) are called exactly once each and
-        receive -SecretSuffix bound to the script-level $SecretSuffix
-        variable. A regression that hard-codes the suffix or drops
-        the forward would defeat the per-lifecycle isolation the
-        parameter exists to enforce.
+    The script still has top-level side effects (module install/import) that make
+    it impractical to dot-source, so these AST checks pin only what the thin
+    entry script itself owns: the SecretSuffix parameter contract, the single
+    orchestrator call carrying the suffix and the registration phases, the -Body
+    wired to the install verbs, and the absence of any shared-opening behaviour
+    (bare secret literals, direct vault reads, router stamping, timing setup)
+    that would signal a partial revert of the extraction.
 #>
 
 BeforeAll {
     $script:scriptPath = Join-Path $PSScriptRoot '..\register-runners.ps1'
+    $script:scriptText = Get-Content -LiteralPath $script:scriptPath -Raw
 
     $tokens    = $null
     $parseErrs = $null
@@ -35,27 +39,34 @@ BeforeAll {
         $node -is [System.Management.Automation.Language.CommandAst]
     }, $true)
 
-    # Returns $true if $Call passes `-SecretSuffix $SecretSuffix`
-    # (the script-level variable, not a literal). Walks CommandElements
-    # in pairs looking for the parameter / variable-expression pair.
-    function Test-ForwardsSecretSuffix {
-        param([System.Management.Automation.Language.CommandAst] $Call)
+    # Returns the value-expression AST bound to the named parameter in a
+    # CommandAst. Walks CommandElements in pairs looking for `-Name <value>`.
+    function Get-BoundArgFor {
+        param(
+            [System.Management.Automation.Language.CommandAst] $Call,
+            [string] $ParameterName
+        )
         for ($i = 1; $i -lt $Call.CommandElements.Count - 1; $i++) {
             $cur  = $Call.CommandElements[$i]
             $next = $Call.CommandElements[$i + 1]
             if ($cur -is [System.Management.Automation.Language.CommandParameterAst] -and
-                $cur.ParameterName -eq 'SecretSuffix' -and
-                $next -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                $next.VariablePath.UserPath -eq 'SecretSuffix') {
-                return $true
+                $cur.ParameterName -eq $ParameterName) {
+                return $next
             }
         }
-        return $false
+        return $null
     }
 
-    # Returns the string literal bound to -Name on an Invoke-WithPhaseTimer
-    # call, or $null when it is not a bare string literal. Used to collect the
-    # declared phase names in source order.
+    # Every string-literal value nested under an AST node, in document order.
+    function Get-StringLiteralsUnder {
+        param([System.Management.Automation.Language.Ast] $Node)
+        $Node.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.StringConstantExpressionAst]
+        }, $true) | ForEach-Object { $_.Value }
+    }
+
+    # Returns the string literal bound to -Name on an Invoke-WithPhaseTimer call.
     function Get-PhaseTimerName {
         param([System.Management.Automation.Language.CommandAst] $Call)
         for ($i = 1; $i -lt $Call.CommandElements.Count - 1; $i++) {
@@ -70,11 +81,10 @@ BeforeAll {
         return $null
     }
 
-    # The phases register-runners.ps1 declares, in dispatch order. Pinned here
-    # so a rename silently reshaping the tree the E2E graft (C2) attaches under
-    # the runner-registration part fails loudly.
-    $script:expectedPhases = @(
-        'Read configs + resolve router IP',
+    # This entry script's registration-direction operation phases, in run order.
+    # Pinned so a rename silently reshaping the tree the E2E graft (C2) attaches
+    # under the runner part fails loudly.
+    $script:expectedOperationPhases = @(
         'Match + probe reachable VMs',
         'Resolve + prefetch runner tarball',
         'Install + register runners'
@@ -114,66 +124,110 @@ Describe 'register-runners.ps1 - SecretSuffix parameter contract' {
     }
 }
 
-Describe 'register-runners.ps1 - suffix forwarding to vault helpers' {
+Describe 'register-runners.ps1 - delegates to the shared orchestrator' {
 
-    # Each helper read must receive the script-level $SecretSuffix
-    # verbatim. Both helpers' own suites (Tests/registration/common/
-    # config/*.Tests.ps1) prove they reject missing/empty input - so
-    # the wiring here is the missing link end-to-end.
-
-    It 'invokes Read-GitHubRunnersConfig exactly once' {
-        $calls = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-GitHubRunnersConfig' }
-        @($calls).Count | Should -Be 1
+    BeforeAll {
+        $script:orchestratorCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-RunnerReconcileRun' })
     }
 
-    It 'forwards $SecretSuffix to Read-GitHubRunnersConfig' {
-        $call = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-GitHubRunnersConfig' } |
-            Select-Object -First 1
-        Test-ForwardsSecretSuffix -Call $call | Should -BeTrue
+    It 'dot-sources the shared orchestrator helper' {
+        # The single call below resolves only if the orchestrator is dot-sourced
+        # first; pin the dot-source so a dropped import fails here, not at runtime.
+        $script:scriptText | Should -Match 'registration\\common\\Invoke-RunnerReconcileRun\.ps1'
     }
 
-    It 'invokes Read-VmDeployPasswords exactly once' {
-        $calls = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-VmDeployPasswords' }
-        @($calls).Count | Should -Be 1
+    It 'calls Invoke-RunnerReconcileRun exactly once' {
+        $script:orchestratorCalls.Count | Should -Be 1
     }
 
-    It 'forwards $SecretSuffix to Read-VmDeployPasswords' {
-        $call = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-VmDeployPasswords' } |
-            Select-Object -First 1
-        Test-ForwardsSecretSuffix -Call $call | Should -BeTrue
+    It 'binds -SecretSuffix to the script $SecretSuffix parameter' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'SecretSuffix'
+        $arg | Should -BeOfType `
+            ([System.Management.Automation.Language.VariableExpressionAst])
+        $arg.VariablePath.UserPath | Should -Be 'SecretSuffix'
+    }
+
+    It 'passes the registration operation phases, in order' {
+        $arg    = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'OperationPhase'
+        $phases = @(Get-StringLiteralsUnder -Node $arg)
+        $phases | Should -Be $script:expectedOperationPhases
+    }
+
+    It 'wires -Body as a scriptblock timing exactly those phases, in order' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'Body'
+        $arg | Should -BeOfType `
+            ([System.Management.Automation.Language.ScriptBlockExpressionAst])
+
+        # Every Invoke-WithPhaseTimer in the file lives inside this -Body, so the
+        # phase names it times must match the declared operation phases exactly.
+        $timerCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-WithPhaseTimer' })
+        $names = @($timerCalls | ForEach-Object { Get-PhaseTimerName -Call $_ })
+        $names | Should -Be $script:expectedOperationPhases
+    }
+
+    It 'the -Body installs and registers runners (owns the up-direction verbs)' {
+        $arg  = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'Body'
+        $text = $arg.Extent.Text
+        $text | Should -Match 'Invoke-VmRunnerGroup'
+        $text | Should -Match 'Invoke-WithVmFileServer'
     }
 }
 
+Describe 'register-runners.ps1 - shared opening not leaked back in' {
 
-Describe 'register-runners.ps1 - jump-host wiring (feature 53 NAT topology)' {
+    # Regression guards for a partial revert of the D3-C extraction. Everything
+    # below moved into Invoke-RunnerReconcileRun; a reappearance here means the
+    # thin entry script grew a second, drifting copy of the shared opening.
 
-    # The host has no route into the per-environment private switch
-    # runner VMs sit on after feature 53 step 2. The script must (1)
-    # read VmProvisionerConfig to find the router row, (2) discover
-    # its upstream IP via KVP, (3) stamp _RouterVm onto every runner
-    # entry in the same env, (4) reach workloads via the jump-aware
-    # New-VmSshClientWithJump instead of constructing a Renci.SshNet.
-    # SshClient directly, and (5) bind the host file server on the
-    # router's upstream LAN (Get-VmSwitchHostIp keyed on the router
-    # IP) so workloads can reach it via the router's MASQUERADE NAT.
-
-    It 'reads VmProvisionerConfig to locate the router row' {
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Match 'VmProvisionerConfig-\$SecretSuffix'
+    BeforeAll {
+        $script:stringLiterals = $script:ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.StringConstantExpressionAst]
+        }, $true)
     }
 
-    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
-        $call = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Get-VmKvpIpAddress' } |
-            Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
+    It 'no longer reads the runner-config vaults directly' {
+        $reads = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @('Read-GitHubRunnersConfig', 'Read-VmDeployPasswords')
+        })
+        $reads.Count | Should -Be 0
     }
 
-    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
+    It 'no longer reads the provisioner vault or discovers the router IP directly' {
+        $calls = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @('Get-InfrastructureSecret', 'Get-VmKvpIpAddress')
+        })
+        $calls.Count | Should -Be 0
+    }
+
+    It 'no longer declares its own timing stages or exports the tree' {
+        $timing = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @(
+                'Initialize-PhaseTimings',
+                'Export-PhaseTimingTree',
+                'Export-PhaseTimingTreeIfRequested')
+        })
+        $timing.Count | Should -Be 0
+    }
+
+    It 'has no bare "VmProvisionerConfig" string literal' {
+        $offenders = $script:stringLiterals | Where-Object {
+            $_.Value -eq 'VmProvisionerConfig'
+        }
+        @($offenders).Count | Should -Be 0 `
+            -Because 'the secret name lives in the orchestrator and always carries the suffix'
+    }
+}
+
+Describe 'register-runners.ps1 - per-VM SSH wiring retained in the body' {
+
+    # The install loop stays here (it is registration-specific), so the
+    # jump-aware session and host-file-server binding must remain, and the
+    # script must never construct a raw Renci.SshNet.SshClient.
+
+    It 'reaches workloads via the jump-aware New-VmSshClientWithJump' {
         $call = $script:commands |
             Where-Object { $_.GetCommandName() -eq 'New-VmSshClientWithJump' } |
             Select-Object -First 1
@@ -187,72 +241,18 @@ Describe 'register-runners.ps1 - jump-host wiring (feature 53 NAT topology)' {
         $call | Should -Not -BeNullOrEmpty
     }
 
-    It 'stamps _RouterVm onto entries via Add-Member' {
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Match "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
-    }
-
-    It 'no longer constructs Renci.SshNet.SshClient directly' {
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Not -Match '\[Renci\.SshNet\.SshClient\]::new'
-    }
-}
-
-
-Describe 'register-runners.ps1 - phase-timing instrumentation (feature 88 D3)' {
-
-    # register-runners.ps1 is a child emitter of the cross-process timing
-    # feature: it declares its stages via Initialize-PhaseTimings, times each
-    # with Invoke-WithPhaseTimer, and hands the tree to a parent orchestrator
-    # on the TIMING_TREE_OUTPUT_PATH opt-in via the self-guarding
-    # Export-PhaseTimingTreeIfRequested shim. These checks pin that wiring so a
-    # dropped stage, a renamed phase, or a reverted export regresses loudly.
-
-    It 'declares its stages once via Initialize-PhaseTimings' {
-        $calls = @($script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Initialize-PhaseTimings' })
-        $calls.Count | Should -Be 1
-    }
-
-    It 'times every declared stage with Invoke-WithPhaseTimer, in order' {
-        $timerCalls = @($script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Invoke-WithPhaseTimer' })
-        $names = @($timerCalls | ForEach-Object { Get-PhaseTimerName -Call $_ })
-        $names | Should -Be $script:expectedPhases
-    }
-
-    It 'exports the tree via the self-guarding opt-in shim exactly once' {
-        $calls = @($script:commands | Where-Object {
-            $_.GetCommandName() -eq 'Export-PhaseTimingTreeIfRequested'
-        })
-        $calls.Count | Should -Be 1
-    }
-
-    It 'does not call the mandatory-path Export-PhaseTimingTree directly' {
-        # The opt-in guard and the env-var name live only in the shim; a direct
-        # Export-PhaseTimingTree here would mean a hand-written guard crept back.
-        $calls = @($script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Export-PhaseTimingTree' })
-        $calls.Count | Should -Be 0
-    }
-
-    It 'does not hand-write the TIMING_TREE_OUTPUT_PATH env-var guard' {
-        # The shim single-sources the contract name and owns the env read; a
-        # literal $env:TIMING_TREE_OUTPUT_PATH reference here signals the
-        # pre-D2-B hand-written guard regressed back in (a comment naming the
-        # variable is fine - only the $env: read is forbidden).
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Not -Match '\$env:TIMING_TREE_OUTPUT_PATH'
+    It 'never constructs Renci.SshNet.SshClient directly' {
+        $script:scriptText | Should -Not -Match '\[Renci\.SshNet\.SshClient\]::new'
     }
 }
 
 Describe 'register-runners.ps1 - Common.PowerShell floor' {
 
     It 'raises the Common.PowerShell floor to the Export-PhaseTimingTreeIfRequested release (>= 9.3.0)' {
-        # The shim register-runners.ps1 calls ships in Common.PowerShell 9.3.0;
-        # the bootstrap floor must stay >= that so the import resolves it. Pin
-        # the MinimumVersion so a downgrade cannot silently leave the run
-        # calling an unexported verb.
+        # The shim the orchestrator calls ships in Common.PowerShell 9.3.0; the
+        # bootstrap floor must stay >= that so the import resolves it. Pin the
+        # MinimumVersion so a downgrade cannot silently leave the run calling an
+        # unexported verb.
         $depsPath = Join-Path (Split-Path $script:scriptPath -Parent) `
             '..\shared\Install-ModuleDependencies.ps1'
         $depsText = Get-Content -Path $depsPath -Raw

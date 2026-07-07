@@ -199,13 +199,15 @@ are silently skipped, and absent runner directories are ignored.
 
 ## Timing instrumentation (E2E opt-in)
 
-Both orchestrators time their stages through the `Common.PowerShell`
+Both entry scripts time their stages through the `Common.PowerShell`
 phase-timing shims and can hand the resulting tree to a parent process for a
-whole-run breakdown. Registration times four stages - read configs + resolve
-router IP, match + probe reachable VMs, resolve + prefetch runner tarball, and
-install + register runners; deregistration times three (it has no tarball
-prefetch) - read configs + resolve router IP, match + probe reachable VMs, and
-deregister runners.
+whole-run breakdown. The shared opening stage (read configs + resolve router IP)
+and the timing export live once in the shared `Invoke-RunnerReconcileRun`
+orchestrator; each entry script supplies only its operation-specific stages.
+Registration times four stages - read configs + resolve router IP, match + probe
+reachable VMs, resolve + prefetch runner tarball, and install + register runners;
+deregistration times three (it has no tarball prefetch) - read configs + resolve
+router IP, match + probe reachable VMs, and deregister runners.
 
 The handoff is strictly opt-in and off by default:
 
@@ -369,10 +371,11 @@ hyper-v/ubuntu/
     Install-ModuleDependencies.ps1
     Tests/                        setup-secrets.Tests.ps1
   PowerShell/                   PowerShell runner implementation
-    register-runners.ps1          Orchestrator for runner registration
-    deregister-runners.ps1        Orchestrator for runner deregistration
+    register-runners.ps1          Thin entry point; delegates to Invoke-RunnerReconcileRun (up direction)
+    deregister-runners.ps1        Thin entry point; delegates to Invoke-RunnerReconcileRun (down direction)
     registration/
       common/ {config,github,infra,service}   Shared read/parse/connectivity/service helpers
+      common/Invoke-RunnerReconcileRun.ps1    Shared orchestrator: vault reads + router resolution + phase-timing envelope
       up/     {binary,github,registration,service} + Invoke-VmRunnerGroup.ps1
       down/   {binary,github,registration,service} + Invoke-VmDeregisterGroup.ps1
     Tests/

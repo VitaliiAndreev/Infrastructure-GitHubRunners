@@ -1,16 +1,19 @@
 <#
 .SYNOPSIS
-    Structural wiring checks for deregister-runners.ps1.
+    Structural wiring checks for the thin deregister-runners.ps1 entry script.
 
 .DESCRIPTION
-    See register-runners.Tests.ps1 for the rationale - deregister-
-    runners.ps1 has the same two-helper read shape and the same
-    SecretSuffix contract, so the checks mirror that file with the
-    script path swapped.
+    See register-runners.Tests.ps1 for the rationale. After feature 88 D3-C,
+    deregister-runners.ps1 is a thin entry point over the shared
+    Invoke-RunnerReconcileRun orchestrator; it supplies the deregistration
+    operation phases (no tarball prefetch, so two stages to the up path's three)
+    and a -Body that probes reachability and removes each runner. The checks
+    mirror the register suite with the down-direction phases and verbs.
 #>
 
 BeforeAll {
     $script:scriptPath = Join-Path $PSScriptRoot '..\deregister-runners.ps1'
+    $script:scriptText = Get-Content -LiteralPath $script:scriptPath -Raw
 
     $tokens    = $null
     $parseErrs = $null
@@ -25,24 +28,30 @@ BeforeAll {
         $node -is [System.Management.Automation.Language.CommandAst]
     }, $true)
 
-    function Test-ForwardsSecretSuffix {
-        param([System.Management.Automation.Language.CommandAst] $Call)
+    function Get-BoundArgFor {
+        param(
+            [System.Management.Automation.Language.CommandAst] $Call,
+            [string] $ParameterName
+        )
         for ($i = 1; $i -lt $Call.CommandElements.Count - 1; $i++) {
             $cur  = $Call.CommandElements[$i]
             $next = $Call.CommandElements[$i + 1]
             if ($cur -is [System.Management.Automation.Language.CommandParameterAst] -and
-                $cur.ParameterName -eq 'SecretSuffix' -and
-                $next -is [System.Management.Automation.Language.VariableExpressionAst] -and
-                $next.VariablePath.UserPath -eq 'SecretSuffix') {
-                return $true
+                $cur.ParameterName -eq $ParameterName) {
+                return $next
             }
         }
-        return $false
+        return $null
     }
 
-    # Returns the string literal bound to -Name on an Invoke-WithPhaseTimer
-    # call, or $null when it is not a bare string literal. Collects the declared
-    # phase names in source order.
+    function Get-StringLiteralsUnder {
+        param([System.Management.Automation.Language.Ast] $Node)
+        $Node.FindAll({
+            param($n)
+            $n -is [System.Management.Automation.Language.StringConstantExpressionAst]
+        }, $true) | ForEach-Object { $_.Value }
+    }
+
     function Get-PhaseTimerName {
         param([System.Management.Automation.Language.CommandAst] $Call)
         for ($i = 1; $i -lt $Call.CommandElements.Count - 1; $i++) {
@@ -57,11 +66,9 @@ BeforeAll {
         return $null
     }
 
-    # The phases deregister-runners.ps1 declares, in dispatch order. The down
-    # path has no tarball prefetch, so it times three stages to the up path's
-    # four. Pinned so a rename reshaping the E2E graft (C2) fails loudly.
-    $script:expectedPhases = @(
-        'Read configs + resolve router IP',
+    # The down-direction operation phases, in run order. The down path has no
+    # tarball prefetch, so it times two stages to the up path's three.
+    $script:expectedOperationPhases = @(
         'Match + probe reachable VMs',
         'Deregister runners'
     )
@@ -100,120 +107,114 @@ Describe 'deregister-runners.ps1 - SecretSuffix parameter contract' {
     }
 }
 
-Describe 'deregister-runners.ps1 - suffix forwarding to vault helpers' {
+Describe 'deregister-runners.ps1 - delegates to the shared orchestrator' {
 
-    It 'invokes Read-GitHubRunnersConfig exactly once' {
-        $calls = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-GitHubRunnersConfig' }
-        @($calls).Count | Should -Be 1
+    BeforeAll {
+        $script:orchestratorCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-RunnerReconcileRun' })
     }
 
-    It 'forwards $SecretSuffix to Read-GitHubRunnersConfig' {
-        $call = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-GitHubRunnersConfig' } |
-            Select-Object -First 1
-        Test-ForwardsSecretSuffix -Call $call | Should -BeTrue
+    It 'dot-sources the shared orchestrator helper' {
+        $script:scriptText | Should -Match 'registration\\common\\Invoke-RunnerReconcileRun\.ps1'
     }
 
-    It 'invokes Read-VmDeployPasswords exactly once' {
-        $calls = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-VmDeployPasswords' }
-        @($calls).Count | Should -Be 1
+    It 'calls Invoke-RunnerReconcileRun exactly once' {
+        $script:orchestratorCalls.Count | Should -Be 1
     }
 
-    It 'forwards $SecretSuffix to Read-VmDeployPasswords' {
-        $call = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Read-VmDeployPasswords' } |
-            Select-Object -First 1
-        Test-ForwardsSecretSuffix -Call $call | Should -BeTrue
+    It 'binds -SecretSuffix to the script $SecretSuffix parameter' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'SecretSuffix'
+        $arg | Should -BeOfType `
+            ([System.Management.Automation.Language.VariableExpressionAst])
+        $arg.VariablePath.UserPath | Should -Be 'SecretSuffix'
+    }
+
+    It 'passes the deregistration operation phases, in order' {
+        $arg    = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'OperationPhase'
+        $phases = @(Get-StringLiteralsUnder -Node $arg)
+        $phases | Should -Be $script:expectedOperationPhases
+    }
+
+    It 'wires -Body as a scriptblock timing exactly those phases, in order' {
+        $arg = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'Body'
+        $arg | Should -BeOfType `
+            ([System.Management.Automation.Language.ScriptBlockExpressionAst])
+
+        $timerCalls = @($script:commands |
+            Where-Object { $_.GetCommandName() -eq 'Invoke-WithPhaseTimer' })
+        $names = @($timerCalls | ForEach-Object { Get-PhaseTimerName -Call $_ })
+        $names | Should -Be $script:expectedOperationPhases
+    }
+
+    It 'the -Body deregisters runners (owns the down-direction verb)' {
+        $arg  = Get-BoundArgFor -Call $script:orchestratorCalls[0] -ParameterName 'Body'
+        $arg.Extent.Text | Should -Match 'Invoke-VmDeregisterGroup'
     }
 }
 
+Describe 'deregister-runners.ps1 - shared opening not leaked back in' {
 
-Describe 'deregister-runners.ps1 - jump-host wiring (feature 53 NAT topology)' {
-
-    # Symmetric to register-runners.ps1's jump-host wiring. The down
-    # path opens an SSH session per reachable VM and does not run a
-    # host file server, so the Get-VmSwitchHostIp leg of the wiring
-    # is intentionally absent here.
-
-    It 'reads VmProvisionerConfig to locate the router row' {
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Match 'VmProvisionerConfig-\$SecretSuffix'
+    BeforeAll {
+        $script:stringLiterals = $script:ast.FindAll({
+            param($node)
+            $node -is [System.Management.Automation.Language.StringConstantExpressionAst]
+        }, $true)
     }
 
-    It 'calls Get-VmKvpIpAddress to discover the router upstream IP' {
-        $call = $script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Get-VmKvpIpAddress' } |
-            Select-Object -First 1
-        $call | Should -Not -BeNullOrEmpty
+    It 'no longer reads the runner-config vaults directly' {
+        $reads = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @('Read-GitHubRunnersConfig', 'Read-VmDeployPasswords')
+        })
+        $reads.Count | Should -Be 0
     }
 
-    It 'calls New-VmSshClientWithJump for the per-VM SSH session' {
+    It 'no longer reads the provisioner vault or discovers the router IP directly' {
+        $calls = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @('Get-InfrastructureSecret', 'Get-VmKvpIpAddress')
+        })
+        $calls.Count | Should -Be 0
+    }
+
+    It 'no longer declares its own timing stages or exports the tree' {
+        $timing = @($script:commands | Where-Object {
+            $_.GetCommandName() -in @(
+                'Initialize-PhaseTimings',
+                'Export-PhaseTimingTree',
+                'Export-PhaseTimingTreeIfRequested')
+        })
+        $timing.Count | Should -Be 0
+    }
+
+    It 'has no bare "VmProvisionerConfig" string literal' {
+        $offenders = $script:stringLiterals | Where-Object {
+            $_.Value -eq 'VmProvisionerConfig'
+        }
+        @($offenders).Count | Should -Be 0 `
+            -Because 'the secret name lives in the orchestrator and always carries the suffix'
+    }
+}
+
+Describe 'deregister-runners.ps1 - per-VM SSH wiring retained in the body' {
+
+    # The down path opens an SSH session per reachable VM and runs no host file
+    # server, so New-VmSshClientWithJump stays but the Get-VmSwitchHostIp leg is
+    # intentionally absent. The script must never construct a raw SshClient.
+
+    It 'reaches workloads via the jump-aware New-VmSshClientWithJump' {
         $call = $script:commands |
             Where-Object { $_.GetCommandName() -eq 'New-VmSshClientWithJump' } |
             Select-Object -First 1
         $call | Should -Not -BeNullOrEmpty
     }
 
-    It 'stamps _RouterVm onto entries via Add-Member' {
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Match "(?s)Add-Member[^']*-Name\s+'_RouterVm'"
-    }
-
-    It 'no longer constructs Renci.SshNet.SshClient directly' {
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Not -Match '\[Renci\.SshNet\.SshClient\]::new'
-    }
-}
-
-
-Describe 'deregister-runners.ps1 - phase-timing instrumentation (feature 88 D3)' {
-
-    # Mirror of register-runners.ps1's wiring for the down direction. The
-    # emitter declares its stages via Initialize-PhaseTimings, times each with
-    # Invoke-WithPhaseTimer, and hands the tree to a parent orchestrator on the
-    # TIMING_TREE_OUTPUT_PATH opt-in via Export-PhaseTimingTreeIfRequested.
-
-    It 'declares its stages once via Initialize-PhaseTimings' {
-        $calls = @($script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Initialize-PhaseTimings' })
-        $calls.Count | Should -Be 1
-    }
-
-    It 'times every declared stage with Invoke-WithPhaseTimer, in order' {
-        $timerCalls = @($script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Invoke-WithPhaseTimer' })
-        $names = @($timerCalls | ForEach-Object { Get-PhaseTimerName -Call $_ })
-        $names | Should -Be $script:expectedPhases
-    }
-
-    It 'exports the tree via the self-guarding opt-in shim exactly once' {
-        $calls = @($script:commands | Where-Object {
-            $_.GetCommandName() -eq 'Export-PhaseTimingTreeIfRequested'
-        })
-        $calls.Count | Should -Be 1
-    }
-
-    It 'does not call the mandatory-path Export-PhaseTimingTree directly' {
-        $calls = @($script:commands |
-            Where-Object { $_.GetCommandName() -eq 'Export-PhaseTimingTree' })
-        $calls.Count | Should -Be 0
-    }
-
-    It 'does not hand-write the TIMING_TREE_OUTPUT_PATH env-var guard' {
-        # Only the $env: read is forbidden; a comment naming the contract
-        # variable is fine (the shim owns the guard and the env read).
-        $text = Get-Content -LiteralPath $script:scriptPath -Raw
-        $text | Should -Not -Match '\$env:TIMING_TREE_OUTPUT_PATH'
+    It 'never constructs Renci.SshNet.SshClient directly' {
+        $script:scriptText | Should -Not -Match '\[Renci\.SshNet\.SshClient\]::new'
     }
 }
 
 Describe 'deregister-runners.ps1 - Common.PowerShell floor' {
 
     It 'raises the Common.PowerShell floor to the Export-PhaseTimingTreeIfRequested release (>= 9.3.0)' {
-        # The shim deregister-runners.ps1 calls ships in Common.PowerShell 9.3.0;
-        # the bootstrap floor must stay >= that so the import resolves it.
         $depsPath = Join-Path (Split-Path $script:scriptPath -Parent) `
             '..\shared\Install-ModuleDependencies.ps1'
         $depsText = Get-Content -Path $depsPath -Raw
