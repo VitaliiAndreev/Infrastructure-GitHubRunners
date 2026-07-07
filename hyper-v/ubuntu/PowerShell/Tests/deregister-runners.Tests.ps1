@@ -3,7 +3,8 @@
     Structural wiring checks for the thin deregister-runners.ps1 entry script.
 
 .DESCRIPTION
-    See register-runners.Tests.ps1 for the rationale. After feature 88 D3-C,
+    See register-runners.Tests.ps1 for the rationale. After Common-PowerShell
+    feature 88 step D3-B,
     deregister-runners.ps1 is a thin entry point over the shared
     Invoke-RunnerReconcileRun orchestrator; it supplies the deregistration
     operation phases (no tarball prefetch, so two stages to the up path's three)

@@ -3,7 +3,8 @@
     Structural wiring checks for the thin register-runners.ps1 entry script.
 
 .DESCRIPTION
-    After feature 88 D3-C, register-runners.ps1 is a thin entry point: it
+    After Common-PowerShell feature 88 step D3-B, register-runners.ps1 is a thin
+    entry point: it
     bootstraps modules, dot-sources its registration-direction helpers plus the
     shared orchestrator, and makes a single call to Invoke-RunnerReconcileRun
     with the registration operation phases and a -Body that joins credentials,
@@ -177,7 +178,7 @@ Describe 'register-runners.ps1 - delegates to the shared orchestrator' {
 
 Describe 'register-runners.ps1 - shared opening not leaked back in' {
 
-    # Regression guards for a partial revert of the D3-C extraction. Everything
+    # Regression guards for a partial revert of the D3-B extraction. Everything
     # below moved into Invoke-RunnerReconcileRun; a reappearance here means the
     # thin entry script grew a second, drifting copy of the shared opening.
 
