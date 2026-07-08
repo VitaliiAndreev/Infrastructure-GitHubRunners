@@ -43,6 +43,13 @@ source "${script_dir}/imports/_log.sh"
 source "${script_dir}/_require-gh-token.sh"
 # shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_common-ansible-root.sh
 source "${script_dir}/imports/_common-ansible-root.sh"
+# shellcheck source=hyper-v/ubuntu/Ansible/ops/imports/_timing.sh
+source "${script_dir}/imports/_timing.sh"
+
+# Arm the timing emitter (a no-op unless TIMING_TREE_OUTPUT_PATH is set) so the
+# E2E orchestrator can graft this flow's staging / dispatch sub-steps under its
+# register-runners part. Neutral opt-in; the flow does not name its consumer.
+timing_init "register-runners"
 
 require_gh_token
 
@@ -52,7 +59,9 @@ require_gh_token
 # needs to serve the directory it is handed. The helper narrates on stderr
 # and prints two KEY=value lines on stdout.
 log_info "Staging runner tarball (resolve version, cache tarball) ..."
+timing_span_begin "stage runner tarball"
 stage_out="$("${script_dir}/_stage-runner-tarball.sh" --github-token "${GH_TOKEN}")"
+timing_span_end
 runner_version="$(grep '^RUNNER_VERSION=' <<<"${stage_out}" | head -n1 | cut -d= -f2-)"
 staging_dir="$(grep    '^STAGING_DIR='    <<<"${stage_out}" | head -n1 | cut -d= -f2-)"
 if [[ -z "${runner_version}" || -z "${staging_dir}" ]]; then
@@ -72,4 +81,22 @@ export CA_HOST_FILE_SERVER_DIR="${staging_dir}"
 export CA_HOST_FILE_SERVER_VERSION="${runner_version}"
 export CA_CONSUMER_ROOT
 
-exec "${common_ansible_root}/ops/_run-playbook.sh" playbooks/register-runners.yml "$@"
+# Dispatch the register-runners playbook - the flow's dominant span. When
+# timing is requested, run it under a span so its duration lands in the tree
+# and the EXIT-trap flush emits the artifact afterward; otherwise exec exactly
+# as before, so the uninstrumented path stays byte-for-byte unchanged.
+playbook_cmd=("${common_ansible_root}/ops/_run-playbook.sh" \
+    playbooks/register-runners.yml "$@")
+# shellcheck disable=SC2310  # predicate in `if`; set -e intentionally relaxed
+if timing_enabled; then
+    timing_span_begin "run playbook"
+    playbook_rc=0
+    "${playbook_cmd[@]}" || playbook_rc=$?
+    if [[ "${playbook_rc}" -eq 0 ]]; then
+        timing_span_end
+    else
+        timing_span_end --failed
+    fi
+    exit "${playbook_rc}"
+fi
+exec "${playbook_cmd[@]}"
