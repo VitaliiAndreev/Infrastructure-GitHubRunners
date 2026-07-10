@@ -1,0 +1,72 @@
+---
+# Shared GitHub REST request surface. Every GitHub API call in this role -
+# the existence probe, the registration-token mint, the removal-token mint,
+# and the orphan force-delete - runs through here so the request ENVELOPE
+# lives in exactly one place instead of being copied per call:
+#   - delegate_to: localhost - the managed VM is usually behind NAT with no
+#     GitHub egress, so the call originates on the controller which has it.
+#   - Authorization: "token <PAT>" (never a URL query string, which would
+#     survive in proxy access logs) plus the github+json Accept header.
+#   - no_log: true so neither the PAT (in the request headers) nor the
+#     response body - which for the mint calls carries a live token - ever
+#     lands at any verbosity.
+#   - return_content: true so callers can read .json / .content.
+#   - the transient-DNS retry: retry ONLY a transport failure (status -1, no
+#     HTTP reply - a control-node DNS blip while host networking churns);
+#     any real HTTP status satisfies `until` at once and passes through to
+#     the caller's failure policy below. Budget knobs are the
+#     runner_registration_api_retries / _retry_delay defaults (SSOT).
+#
+# Per-call surface and the destination fact arrive as vars:
+#   runner_registration_request_method       HTTP method (default GET)
+#   runner_registration_request_url          full request URL
+#   runner_registration_request_status_code  accepted status list
+#                                             (default [200])
+#   runner_registration_request_failed_when  failure override; default is
+#                                             "fail unless the status is
+#                                             accepted". The probe passes
+#                                             `false` to keep a non-200
+#                                             non-fatal so its own surfacing
+#                                             task can name the cause.
+#   runner_registration_request_register_as  name of the fact to publish
+#                                             the response under
+#
+# The response is republished under the caller's chosen fact name (a
+# templated set_fact key) rather than one shared register, because each
+# caller reads its response in different later tasks - and the probe
+# response is read many tasks later - so a single shared register would be
+# clobbered by the next call. Keeping the caller's own name also keeps
+# every downstream reference self-documenting.
+
+- name: "Call the GitHub API with method {{ runner_registration_request_method | default('GET') }}"
+  ansible.builtin.uri:
+    url: "{{ runner_registration_request_url }}"
+    method: "{{ runner_registration_request_method | default('GET') }}"
+    headers:
+      Authorization: "token {{ github_token }}"
+      Accept: application/vnd.github+json
+    return_content: true
+  delegate_to: localhost
+  register: runner_registration_request_result
+  no_log: true
+  retries: "{{ runner_registration_api_retries }}"
+  delay: "{{ runner_registration_api_retry_delay }}"
+  until: runner_registration_request_result.status | default(-1) != -1
+  # Failure policy is driven here, not by uri's native status_code, so one
+  # knob covers both shapes. Default: fail when the observed status is not
+  # in the accepted set (the uri module's own behaviour, restated so a
+  # caller can override it). The probe passes `false` to defer its non-200
+  # failure to its surfacing task, which no_log would otherwise censor.
+  failed_when: >-
+    {{ runner_registration_request_failed_when
+       | default(runner_registration_request_result.status | default(-1)
+                 not in (runner_registration_request_status_code
+                         | default([200]))) }}
+
+# Publish the response under the caller's fact so downstream tasks keep
+# their existing, self-documenting names. no_log: true because the mint
+# responses carry a live registration / removal token in the body.
+- name: Publish the GitHub API response under the caller's fact name
+  ansible.builtin.set_fact:
+    "{{ runner_registration_request_register_as }}": "{{ runner_registration_request_result }}"
+  no_log: true

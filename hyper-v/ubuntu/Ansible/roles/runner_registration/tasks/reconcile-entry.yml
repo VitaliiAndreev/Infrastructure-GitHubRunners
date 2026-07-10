@@ -82,24 +82,18 @@
   no_log: true
   when: runner_registration_should_remove_first
 
-# Mint the registration token. Same controller-side delegate; same
-# no_log; same status_code: 201. The registration token differs from
-# the removal token (different endpoint, different scope) so each
-# branch mints its own rather than trying to share one.
+# Mint the registration token via the shared request envelope. The
+# registration token differs from the removal token (different endpoint,
+# different scope) so each branch mints its own rather than sharing one.
 - name: Mint a registration token
-  ansible.builtin.uri:
-    url: >-
+  ansible.builtin.include_tasks: _github-api-request.yml
+  vars:
+    runner_registration_request_method: POST
+    runner_registration_request_url: >-
       {{ github_api_base_url }}/repos/{{ runner_registration_entry_owner
       }}/{{ runner_registration_entry_repo }}/actions/runners/registration-token
-    method: POST
-    headers:
-      Authorization: "token {{ github_token }}"
-      Accept: application/vnd.github+json
-    status_code: 201
-    return_content: true
-  delegate_to: localhost
-  register: runner_registration_token_resp
-  no_log: true
+    runner_registration_request_status_code: [201]
+    runner_registration_request_register_as: runner_registration_token_resp
   when: runner_registration_should_register
 
 # Run `config.sh --unattended` to write .runner and register the
