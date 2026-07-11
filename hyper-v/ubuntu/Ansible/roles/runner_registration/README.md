@@ -59,6 +59,14 @@ The role reads three extra-vars supplied by the bash bridge
   scenarios, for a controller-local mock that records requests so the
   reconcile branches can be asserted without round-tripping to real
   GitHub.
+- `runner_registration_api_retries` (default `5`) /
+  `runner_registration_api_retry_delay` (default `3` seconds) - retry
+  budget for every controller-side GitHub `uri` task. Each task retries
+  only on a transport failure (response `status == -1`, i.e. no HTTP
+  reply - typically a transient control-node DNS blip while the host
+  network churns); any real HTTP status stops the retry immediately and
+  flows through to that task's normal handling, so auth and rate-limit
+  errors are neither retried nor masked.
 
 ## Register direction
 
@@ -138,6 +146,14 @@ shared files keep both directions on the same wire surface:
   branch and the remove direction share the URI body and the
   `runner_registration_remove_token_resp` fact name; only the
   guarding `when:` differs.
+- [`tasks/_github-api-request.yml`](tasks/_github-api-request.yml) —
+  the shared request envelope every GitHub call (probe, both mints,
+  orphan delete, and the unreachable-VM force-delete in
+  [`playbooks/tasks/_handle-unreachable-entry.yml`](../../playbooks/tasks/_handle-unreachable-entry.yml))
+  routes through: `delegate_to: localhost`, the `token <PAT>` auth
+  header, `no_log`, and the transient-DNS retry. Callers pass the
+  per-call method / URL / accepted status codes and the fact name to
+  publish the response under.
 
 The on-disk marker files (`.runner`, `.credentials`) are not touched
 by this role on the remove path — they live inside
@@ -150,11 +166,17 @@ unconditionally one role later.
 
 Every task that touches a token (the GitHub PAT, the minted
 registration token, or the minted removal token) sets `no_log: true`.
-At default verbosity Ansible never prints token values; at `-vvv` it
-prints `VALUE_SPECIFIED_IN_NO_LOG_PARAMETER` placeholders for the
-affected arguments rather than the raw bytes. The PAT itself rides in
-the `Authorization` header (never in the URL query string) so it does
-not survive in any proxy or access log between the controller and
+The GitHub calls get this from the single shared
+[`tasks/_github-api-request.yml`](tasks/_github-api-request.yml)
+envelope rather than each restating it, so the `no_log` posture and
+the auth-header shape cannot drift between call sites; the response is
+republished under the caller's fact via a `no_log` `set_fact` because
+the mint responses carry a live token in the body. At default
+verbosity Ansible never prints token values; at `-vvv` it prints
+`VALUE_SPECIFIED_IN_NO_LOG_PARAMETER` placeholders for the affected
+arguments rather than the raw bytes. The PAT itself rides in the
+`Authorization` header (never in the URL query string) so it does not
+survive in any proxy or access log between the controller and
 api.github.com.
 
 Tokens are minted run-time only. Nothing in this role writes a token

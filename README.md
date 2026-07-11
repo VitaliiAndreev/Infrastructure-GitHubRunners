@@ -14,6 +14,7 @@ provisioned by
 - [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
 - [Idempotency](#idempotency)
 - [Deregistration](#deregistration)
+- [Timing instrumentation (E2E opt-in)](#timing-instrumentation-e2e-opt-in)
 - [Ansible runner flow (Common-Ansible substrate)](#ansible-runner-flow-common-ansible-substrate)
 - [CI and linting](#ci-and-linting)
 - [Repo structure](#repo-structure)
@@ -29,7 +30,9 @@ PowerShell 7+ (`pwsh`).
 ## Prerequisites
 
 - Windows host with Hyper-V and PowerShell 7+.
-- `Common.PowerShell` >= `3.1.0` installed from PSGallery.
+- `Common.PowerShell` >= `9.3.0` installed from PSGallery (auto-installed by
+  the shared module bootstrap; supplies the phase-timing shims the
+  orchestrators use, see [Timing instrumentation](#timing-instrumentation-e2e-opt-in)).
 - VMs provisioned by **Infrastructure-Vm-Provisioner** and reachable.
 - A deploy user and a runner service user created on each VM by
   **Infrastructure-Vm-Users** before running this script (named in the
@@ -194,6 +197,34 @@ are silently skipped, and absent runner directories are ignored.
 
 ---
 
+## Timing instrumentation (E2E opt-in)
+
+Both entry scripts time their stages through the `Common.PowerShell`
+phase-timing shims and can hand the resulting tree to a parent process for a
+whole-run breakdown. The shared opening stage (read configs + resolve router IP)
+and the timing export live once in the shared `Invoke-RunnerReconcileRun`
+orchestrator; each entry script supplies only its operation-specific stages.
+Registration times four stages - read configs + resolve router IP, match + probe
+reachable VMs, resolve + prefetch runner tarball, and install + register runners;
+deregistration times three (it has no tarball prefetch) - read configs + resolve
+router IP, match + probe reachable VMs, and deregister runners.
+
+The handoff is strictly opt-in and off by default:
+
+- **Unset** (the normal operator run): behaviour is unchanged. Nothing extra is
+  written and console output is identical to before.
+- **Set** `TIMING_TREE_OUTPUT_PATH` to a file path: each script serialises its
+  phase tree to that path in its outer `finally` - on success **and** failure -
+  so the caller can graft this run's timings under the runner part that shelled
+  out to it. This is how **Infrastructure-E2E** turns an opaque "register
+  runners" part into its per-stage breakdown.
+
+The variable name is a neutral cross-process contract owned by the
+`Export-PhaseTimingTreeIfRequested` shim, not by this repo; the scripts never
+name a test framework.
+
+---
+
 ## Ansible runner flow (Common-Ansible substrate)
 
 Alongside the PowerShell orchestrators above, this repo owns an **Ansible**
@@ -228,8 +259,9 @@ under the same parent directory; override with `COMMON_ANSIBLE_ROOT`). The
 roles are not standalone - they read the bridge's extra-vars/inventory
 contract - so roles and bridge are one substrate, taken together through one
 checkout. `ops/imports/_common-ansible-root.sh` resolves that root once;
-`ops/bootstrap-controller.sh` reuses the substrate's controller venv rather
-than building its own.
+`ops/bootstrap-controller.sh` is a thin shim over the substrate's shared
+consumer bootstrap (`ops/bootstrap-controller-consumer.sh`), reusing the
+controller venv rather than building its own.
 
 Each wrapper declares this repo as the consumer through the bridge's `CA_*`
 contract: `CA_CONSUMER_ROOT` points the bridge at this repo so it runs *this*
@@ -339,10 +371,11 @@ hyper-v/ubuntu/
     Install-ModuleDependencies.ps1
     Tests/                        setup-secrets.Tests.ps1
   PowerShell/                   PowerShell runner implementation
-    register-runners.ps1          Orchestrator for runner registration
-    deregister-runners.ps1        Orchestrator for runner deregistration
+    register-runners.ps1          Thin entry point; delegates to Invoke-RunnerReconcileRun (up direction)
+    deregister-runners.ps1        Thin entry point; delegates to Invoke-RunnerReconcileRun (down direction)
     registration/
       common/ {config,github,infra,service}   Shared read/parse/connectivity/service helpers
+      common/Invoke-RunnerReconcileRun.ps1    Shared orchestrator: vault reads + router resolution + phase-timing envelope
       up/     {binary,github,registration,service} + Invoke-VmRunnerGroup.ps1
       down/   {binary,github,registration,service} + Invoke-VmDeregisterGroup.ps1
     Tests/

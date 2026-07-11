@@ -8,6 +8,13 @@
     stops and uninstalls the systemd service, deregisters from GitHub via
     config.sh, and removes the runner directory.
 
+    The shared opening - the two vault reads, the feature-53 router resolution,
+    the phase-timing setup, and the timing export - lives in the shared
+    Invoke-RunnerReconcileRun orchestrator (registration/common); this entry
+    script supplies only the deregistration direction: its operation phases and
+    a -Body that probes reachability and removes each runner (with a force-mode
+    GitHub-API path for unreachable VMs).
+
     Prerequisites:
     - setup-secrets.ps1 has been run at least once on this machine.
     - VMs are provisioned (Infrastructure-Vm-Provisioner) and reachable, or
@@ -37,6 +44,14 @@
 [Diagnostics.CodeAnalysis.SuppressMessageAttribute(
     'PSAvoidUsingEmptyCatchBlock', '',
     Justification = 'Dispose cleanup must not throw out of a finally block')]
+# Deploy passwords are plaintext by design (see
+# registration/common/config/Read-VmDeployPasswords.ps1 for the rationale); the
+# -Body callback param only forwards that documented collection to
+# Join-RunnerDeployCredentials, so the plaintext-password rule is a false
+# positive here. Suppress it file-wide (the rule stays live for real secrets).
+[Diagnostics.CodeAnalysis.SuppressMessageAttribute(
+    'PSAvoidUsingPlainTextForPassword', '',
+    Justification = 'Deploy passwords are plaintext by design; the param only forwards them')]
 [CmdletBinding()]
 param(
     [switch] $Force,
@@ -62,7 +77,9 @@ $ErrorActionPreference = 'Stop'
 
 # Dot-source helpers after the modules are loaded so Assert-RequiredProperties,
 # Invoke-GitHubApi, and the SSH helpers are available inside their function
-# bodies.
+# bodies. The shared orchestrator drives the run; the deregistration-direction
+# helpers back its -Body. Read-GitHubRunnersConfig / Read-VmDeployPasswords are
+# dot-sourced here because the orchestrator resolves them in this scope.
 . "$PSScriptRoot\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1"
 . "$PSScriptRoot\registration\common\config\Join-RunnerDeployCredentials.ps1"
 . "$PSScriptRoot\registration\common\config\Read-GitHubPat.ps1"
@@ -73,6 +90,7 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\registration\common\infra\Test-RunnerVmConnectivity.ps1"
 . "$PSScriptRoot\registration\common\service\Get-RunnerServiceName.ps1"
 . "$PSScriptRoot\registration\common\service\Test-RunnerServiceActive.ps1"
+. "$PSScriptRoot\registration\common\Invoke-RunnerReconcileRun.ps1"
 . "$PSScriptRoot\registration\down\binary\Remove-RunnerFiles.ps1"
 . "$PSScriptRoot\registration\down\github\Remove-GitHubRunner.ps1"
 . "$PSScriptRoot\registration\down\registration\Invoke-RunnerConfigRemove.ps1"
@@ -100,184 +118,162 @@ if (-not $Token) {
     $Token = Read-GitHubPat
 }
 
-# ---------------------------------------------------------------------------
-# Read configs from vaults
-# ---------------------------------------------------------------------------
-
-$runnerEntries   = Read-GitHubRunnersConfig -SecretSuffix $SecretSuffix
-$deployPasswords = Read-VmDeployPasswords    -SecretSuffix $SecretSuffix
-
-# ---------------------------------------------------------------------------
-# Router-VM resolution (feature-53 NAT topology)
-#   Read VmProvisionerConfig to find the router row (kind == 'router'),
-#   discover its upstream IP via Hyper-V KVP when absent, and stamp it as
-#   _RouterVm on every runner entry sharing the router's privateSwitchName.
-#   New-VmSshClientWithJump downstream uses that property to decide
-#   direct-vs-jumped session per VM. Symmetric with register-runners.ps1.
-# ---------------------------------------------------------------------------
-
-$provisionerJson = Get-InfrastructureSecret `
-                       -VaultName  'VmProvisioner' `
-                       -SecretName "VmProvisionerConfig-$SecretSuffix"
-$provisionerVms  = @($provisionerJson | ConvertFrom-Json)
-
-$routerVm = $provisionerVms | Where-Object {
-    $_.PSObject.Properties['kind'] -and $_.kind -eq 'router'
-} | Select-Object -First 1
-
-if ($null -ne $routerVm) {
-    Import-Module Hyper-V -ErrorAction Stop
-
-    if (-not ($routerVm.PSObject.Properties['ipAddress'] -and $routerVm.ipAddress)) {
-        Write-Host "Resolving router '$($routerVm.vmName)' upstream IP via KVP ..." `
-            -NoNewline -ForegroundColor Cyan
-        $routerIp = Get-VmKvpIpAddress `
-                        -VmName     $routerVm.vmName `
-                        -SwitchName $routerVm.externalSwitchName `
-                        -OnPoll     { Write-Host '.' -NoNewline -ForegroundColor Cyan }
-        Add-Member -InputObject $routerVm -MemberType NoteProperty `
-                   -Name 'ipAddress' -Value $routerIp -Force
-        Write-Host " $routerIp" -ForegroundColor Green
-    }
-
-    $provisionerIndex = @{}
-    foreach ($vm in $provisionerVms) {
-        $provisionerIndex[$vm.vmName] = $vm
-    }
-    foreach ($entry in $runnerEntries) {
-        if (-not $provisionerIndex.ContainsKey($entry.vmName)) { continue }
-        $provVm   = $provisionerIndex[$entry.vmName]
-        $isRouter = $provVm.PSObject.Properties['kind'] -and `
-                    $provVm.kind -eq 'router'
-        if ($isRouter) { continue }
-        $sameEnv  = $provVm.PSObject.Properties['privateSwitchName'] -and `
-                    $provVm.privateSwitchName -eq $routerVm.privateSwitchName
-        if (-not $sameEnv) { continue }
-
-        Add-Member -InputObject $entry -MemberType NoteProperty `
-                   -Name '_RouterVm' -Value $routerVm -Force
-    }
-}
+# Collected across the deregister phase so all reachable VMs are processed
+# first, then reported at the end. Declared here (entry-script scope) so the
+# -Body phase can append to it via closure and it is still readable after the
+# orchestrator returns, to drive the non-zero exit below.
+$errors = [System.Collections.Generic.List[string]]::new()
 
 # ---------------------------------------------------------------------------
-# Join runner entries to deploy credentials
-#    Entries with no matching password in VmUsers vault are warned and
-#    skipped - they likely reference a user not yet created by
-#    Infrastructure-Vm-Users.
+# Drive the shared orchestration in the deregistration direction. The
+# orchestrator times the shared opening (read configs + resolve router IP) and
+# exports the tree on the opt-in; the -Body below owns the deregistration
+# phases, receiving the router-stamped runner entries and deploy passwords.
+# The down path has no tarball prefetch, so it declares two operation phases to
+# the up path's three.
 # ---------------------------------------------------------------------------
 
-$targets = Join-RunnerDeployCredentials `
-    -RunnerEntries   $runnerEntries `
-    -DeployPasswords $deployPasswords
+Invoke-RunnerReconcileRun `
+    -SecretSuffix   $SecretSuffix `
+    -OperationPhase @(
+        'Match + probe reachable VMs',
+        'Deregister runners'
+    ) `
+    -Body {
+        param($RunnerEntries, $DeployPasswords)
 
-# ---------------------------------------------------------------------------
-# Ping each matched VM
-# ---------------------------------------------------------------------------
+        Invoke-WithPhaseTimer -Name 'Match + probe reachable VMs' -Action {
 
-$reachable   = Test-RunnerVmConnectivity -Targets $targets
-$reachableVms = $reachable | Group-Object { $_.Entry.vmName } |
-    ForEach-Object { $_.Name }
+            # -----------------------------------------------------------------
+            # Join runner entries to deploy credentials
+            #    Entries with no matching password in VmUsers vault are warned
+            #    and skipped - they likely reference a user not yet created by
+            #    Infrastructure-Vm-Users.
+            # -----------------------------------------------------------------
 
-# ---------------------------------------------------------------------------
-# Deregister runners via SSH on reachable VMs; handle unreachable VMs
-#   Errors for unreachable VMs in normal mode are collected and reported at
-#   the end so all reachable VMs are processed first.
-#
-#   Security: deployPassword must never appear in SSH commands, console
-#   output, or error messages. Log only vmName and deployUsername.
-#   Removal tokens are treated with the same care.
-#
-#   SSH.NET is used directly (not Posh-SSH cmdlets) - see the Posh-SSH
-#   comment above for why.
-# ---------------------------------------------------------------------------
+            # $script:-scoped so the deregister phase below can read the matched
+            # targets and the reachable-VM name set (child-scope survival).
+            $script:targets = Join-RunnerDeployCredentials `
+                -RunnerEntries   $RunnerEntries `
+                -DeployPasswords $DeployPasswords
 
-$vmGroups  = $targets | Group-Object { $_.Entry.vmName }
-$errors    = [System.Collections.Generic.List[string]]::new()
-
-foreach ($group in $vmGroups) {
-    $first     = $group.Group[0]
-    $vmName    = $first.Entry.vmName
-    $ipAddress = $first.Entry.ipAddress
-    $username  = $first.Entry.deployUsername
-    # Plain string - see registration\common\config\Read-VmDeployPasswords.ps1
-    # for rationale.
-    $password  = $first.Password
-
-    if ($reachableVms -contains $vmName) {
-        Write-Host ""
-        Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
-
-        # See register-runners.ps1 for the vmShim rationale - New-VmSsh-
-        # ClientWithJump expects ipAddress/username/password on a single
-        # object, and runner entries use deployUsername.
-        $vmShim = [PSCustomObject]@{
-            ipAddress = $ipAddress
-            username  = $username
-            password  = $password
-        }
-        if ($first.Entry.PSObject.Properties['_RouterVm'] -and `
-            $first.Entry._RouterVm) {
-            Add-Member -InputObject $vmShim -MemberType NoteProperty `
-                       -Name '_RouterVm' -Value $first.Entry._RouterVm -Force
+            # Ping each matched VM.
+            $reachable = Test-RunnerVmConnectivity -Targets $script:targets
+            $script:reachableVms = $reachable | Group-Object { $_.Entry.vmName } |
+                ForEach-Object { $_.Name }
         }
 
-        $sshSession = $null
+        Invoke-WithPhaseTimer -Name 'Deregister runners' -Action {
 
-        try {
-            $sshSession = New-VmSshClientWithJump -Vm $vmShim
+            # -----------------------------------------------------------------
+            # Deregister runners via SSH on reachable VMs; handle unreachable VMs
+            #   Errors for unreachable VMs in normal mode are collected and
+            #   reported after the run so all reachable VMs are processed first.
+            #
+            #   Security: deployPassword must never appear in SSH commands,
+            #   console output, or error messages. Log only vmName and
+            #   deployUsername. Removal tokens are treated with the same care.
+            #
+            #   SSH.NET is used directly (not Posh-SSH cmdlets) - see the
+            #   Install-ModuleDependencies Posh-SSH comment for why.
+            # -----------------------------------------------------------------
 
-            Invoke-VmDeregisterGroup `
-                -SshClient $sshSession.Client `
-                -VmName    $vmName `
-                -Targets   $group.Group `
-                -Token     $token
-        }
-        catch [Renci.SshNet.Common.SshConnectionException] {
-            Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
-        }
-        finally {
-            if ($null -ne $sshSession) {
-                try { $sshSession.Dispose() } catch {}
+            # Local aliases over the script-scoped cross-phase values so the
+            # loop below reads exactly as it did before the phase wrapping.
+            $targets      = $script:targets
+            $reachableVms = $script:reachableVms
+
+            $vmGroups = $targets | Group-Object { $_.Entry.vmName }
+
+            foreach ($group in $vmGroups) {
+                $first     = $group.Group[0]
+                $vmName    = $first.Entry.vmName
+                $ipAddress = $first.Entry.ipAddress
+                $username  = $first.Entry.deployUsername
+                # Plain string - see registration\common\config\Read-VmDeployPasswords.ps1
+                # for rationale.
+                $password  = $first.Password
+
+                if ($reachableVms -contains $vmName) {
+                    Write-Host ""
+                    Write-Host "[$vmName] Connecting as '$username' ..." -ForegroundColor Cyan
+
+                    # See register-runners.ps1 for the vmShim rationale -
+                    # New-VmSshClientWithJump expects ipAddress/username/password
+                    # on a single object, and runner entries use deployUsername.
+                    $vmShim = [PSCustomObject]@{
+                        ipAddress = $ipAddress
+                        username  = $username
+                        password  = $password
+                    }
+                    if ($first.Entry.PSObject.Properties['_RouterVm'] -and `
+                        $first.Entry._RouterVm) {
+                        Add-Member -InputObject $vmShim -MemberType NoteProperty `
+                                   -Name '_RouterVm' -Value $first.Entry._RouterVm -Force
+                    }
+
+                    $sshSession = $null
+
+                    try {
+                        $sshSession = New-VmSshClientWithJump -Vm $vmShim
+
+                        Invoke-VmDeregisterGroup `
+                            -SshClient $sshSession.Client `
+                            -VmName    $vmName `
+                            -Targets   $group.Group `
+                            -Token     $Token
+                    }
+                    catch [Renci.SshNet.Common.SshConnectionException] {
+                        Write-Error "[$vmName] SSH connection failed: $($_.Exception.Message)"
+                    }
+                    finally {
+                        if ($null -ne $sshSession) {
+                            try { $sshSession.Dispose() } catch {}
+                        }
+                    }
+                }
+                else {
+                    # VM is unreachable - check GitHub state for each runner entry.
+                    foreach ($target in $group.Group) {
+                        $entry        = $target.Entry
+                        $registration = Get-GitHubRunnerRegistration `
+                            -Token      $Token `
+                            -GithubUrl  $entry.githubUrl `
+                            -RunnerName $entry.runnerName
+
+                        if (-not $registration) {
+                            Write-Host ("[$vmName] Runner '$($entry.runnerName)': unreachable " +
+                                "and not on GitHub - skipping.") -ForegroundColor Yellow
+                            continue
+                        }
+
+                        if ($Force) {
+                            # Remove the GitHub registration directly - no SSH access needed.
+                            Write-Host ("[$vmName] Runner '$($entry.runnerName)': unreachable " +
+                                "- removing from GitHub (force mode).") -ForegroundColor Yellow
+                            Remove-GitHubRunner `
+                                -Token     $Token `
+                                -GithubUrl $entry.githubUrl `
+                                -RunnerId  $registration.id
+                        }
+                        else {
+                            $errors.Add(
+                                "[$vmName] Runner '$($entry.runnerName)': VM unreachable and " +
+                                "runner is still registered on GitHub. Re-run with -Force to " +
+                                "remove it via the GitHub API, or deregister manually.")
+                        }
+                    }
+                }
             }
         }
     }
-    else {
-        # VM is unreachable - check GitHub state for each runner entry.
-        foreach ($target in $group.Group) {
-            $entry        = $target.Entry
-            $registration = Get-GitHubRunnerRegistration `
-                -Token      $token `
-                -GithubUrl  $entry.githubUrl `
-                -RunnerName $entry.runnerName
-
-            if (-not $registration) {
-                Write-Host ("[$vmName] Runner '$($entry.runnerName)': unreachable " +
-                    "and not on GitHub - skipping.") -ForegroundColor Yellow
-                continue
-            }
-
-            if ($Force) {
-                # Remove the GitHub registration directly - no SSH access needed.
-                Write-Host ("[$vmName] Runner '$($entry.runnerName)': unreachable " +
-                    "- removing from GitHub (force mode).") -ForegroundColor Yellow
-                Remove-GitHubRunner `
-                    -Token     $token `
-                    -GithubUrl $entry.githubUrl `
-                    -RunnerId  $registration.id
-            }
-            else {
-                $errors.Add(
-                    "[$vmName] Runner '$($entry.runnerName)': VM unreachable and " +
-                    "runner is still registered on GitHub. Re-run with -Force to " +
-                    "remove it via the GitHub API, or deregister manually.")
-            }
-        }
-    }
-}
 
 # ---------------------------------------------------------------------------
 # Report any errors collected from unreachable VMs in normal mode.
-#    Exit with a non-zero code so CI/callers can detect incomplete runs.
+#    Runs after the orchestrator returns (so the timing export in its finally
+#    always fires first). Exit with a non-zero code so CI/callers can detect
+#    incomplete runs. Reached only on the success path; if a phase threw, the
+#    exception has already propagated past this point.
 # ---------------------------------------------------------------------------
 
 if ($errors.Count -gt 0) {

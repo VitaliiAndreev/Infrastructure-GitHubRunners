@@ -15,3 +15,17 @@
 # a role-private prefix would just force every call site to alias it
 # back. Same posture as runner_version under runner_binary.
 github_api_base_url: "https://api.github.com"  # noqa: var-naming[no-role-prefix]
+
+# Retry budget for the controller-side GitHub API calls (every uri task
+# in this role is delegate_to: localhost). The control node reaches the
+# public internet through the WSL/host DNS path, which blips transiently
+# while the E2E flow churns host networking (External vSwitch bind, ICS
+# toggle) - a single "Temporary failure in name resolution" then kills
+# an otherwise healthy run. Each uri task keys `until` off its own
+# response status so only a transport failure (status -1, no HTTP reply)
+# is retried; a real HTTP status (200/401/403/...) satisfies `until` on
+# the first try and flows straight through to that task's normal
+# success/surface handling, so auth and rate-limit errors are neither
+# retried pointlessly nor masked. Single source of truth for both knobs.
+runner_registration_api_retries: 5
+runner_registration_api_retry_delay: 3

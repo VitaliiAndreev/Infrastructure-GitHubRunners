@@ -35,18 +35,30 @@ _bats_resolve_bash() {
 }
 
 # Stand up a fake COMMON_AUTOMATION_ROOT containing the cross-repo shell
-# helpers ops/ scripts source at runtime - currently scripts/log.sh, the
-# shared logger every ops/ script pulls in via the _log.sh resolver shim.
-# CI checks out no Common-Automation sibling (the bash workflow is the
-# reusable one FROM Common-Automation, run against this repo), so each bats
-# that runs an ops/ script must reconstruct what that script sources. The
-# logger stub is self-contained (no colors.sh dependency) and reproduces
-# the real logger's no-colour output byte-for-byte - which is exactly what
-# the real logger emits under a non-TTY test stream - so log assertions
-# hold against either.
+# helpers ops/ scripts source at runtime - scripts/log.sh (the shared logger
+# every ops/ script pulls in via the _log.sh resolver shim) and scripts/
+# timing.sh (the timing-span emitter register-runners.sh sources via the
+# _timing.sh shim). CI checks out no Common-Automation sibling (the bash
+# workflow is the reusable one FROM Common-Automation, run against this repo),
+# so each bats that runs an ops/ script must reconstruct what that script
+# sources. The logger stub is self-contained (no colors.sh dependency) and
+# reproduces the real logger's no-colour output byte-for-byte - which is
+# exactly what the real logger emits under a non-TTY test stream - so log
+# assertions hold against either. The timing stub reproduces the emitter's
+# disabled path only: these ops/ suites run with TIMING_TREE_OUTPUT_PATH unset,
+# so every verb is inert and timing_enabled is false (the real emitter's
+# behaviour is covered by Common-Automation/scripts/timing.bats).
 _bats_install_common_automation_stub() {
     local root="$1"
     mkdir -p "${root}/scripts"
+    cat >"${root}/scripts/timing.sh" <<'STUB'
+#!/usr/bin/env bash
+# Test stub for Common-Automation/scripts/timing.sh - disabled-path only.
+timing_init()       { :; }
+timing_enabled()    { return 1; }
+timing_span_begin() { :; }
+timing_span_end()   { :; }
+STUB
     cat >"${root}/scripts/log.sh" <<'STUB'
 #!/usr/bin/env bash
 # Test stub for Common-Automation/scripts/log.sh - the [ts] LEVEL <script>:
