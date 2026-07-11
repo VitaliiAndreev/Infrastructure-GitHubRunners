@@ -74,6 +74,18 @@ that installs `acl`. It carries `tags: always` so it survives a narrowed
 do not coordinate across tag scopes (see above), this prerequisite must
 run whenever any of them does.
 
+The install is conditional. On a fresh VM the apt task is dominated by its
+`update_cache` refresh (a full archive metadata pull over the VM's NAT path,
+~61s - the biggest single task in the register play), and `update_cache` runs
+whether or not `acl` is present, so package state alone cannot skip it. The
+provisioner base image now bakes `acl` in
+(`Infrastructure-Vm-Provisioner` `Invoke-BaseImagePatch` Patch 4), so the step
+first gathers `package_facts` (a local dpkg read, ~1s, no `become`) and gates
+the apt task on `when: 'acl' not in ansible_facts.packages`. When acl is baked
+in the whole refresh+install is skipped; for any host not built from that base
+image (e.g. a stock production cloud image) the apt fallback still installs it,
+so correctness does not depend on the base image.
+
 This only matters in production, where the SSH connection user is the
 unprivileged deploy user. The molecule scenarios connect as root
 (`ansible_user: root`), so Ansible chmods the temp files directly and skips

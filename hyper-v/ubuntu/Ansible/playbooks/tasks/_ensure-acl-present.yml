@@ -18,6 +18,24 @@
 # temp files directly and skip ACLs entirely - which is why the molecule
 # scenarios (ansible_user: root) pass without this package and so cannot
 # catch its absence.
+#
+# Cost note: on a fresh VM the apt task below is dominated by its
+# update_cache refresh (a full archive metadata pull over the VM's NAT
+# path, ~61s - the single biggest task in the register play), not by
+# installing the tiny acl package. update_cache runs regardless of whether
+# acl is present, so it cannot be skipped by package state alone. The
+# provisioner base image now bakes acl in (Infrastructure-Vm-Provisioner
+# Invoke-BaseImagePatch Patch 4), so we gate the whole apt task on a cheap,
+# local package-facts check: when acl is already present (the baked-image
+# case) the refresh+install is skipped entirely; when it is absent (any host
+# not built from that base image, e.g. a stock production cloud image) the
+# apt fallback still installs it. package_facts reads the dpkg db locally
+# (no network, ~1s) and needs no become, so it is safe to run before any
+# unprivileged-become task.
+- name: Gather installed package facts
+  ansible.builtin.package_facts:
+    manager: apt
+
 - name: Ensure the acl package is present for unprivileged become
   ansible.builtin.apt:
     name: acl
@@ -25,3 +43,4 @@
     update_cache: true
     cache_valid_time: 3600
   become: true
+  when: "'acl' not in ansible_facts.packages"
