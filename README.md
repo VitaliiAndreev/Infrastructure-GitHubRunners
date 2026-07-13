@@ -313,11 +313,14 @@ against one shared engine - no per-repo copies of the lint config to drift.
 
 | Workflow | Runs | Calls |
 |---|---|---|
-| `.github/workflows/ci-yaml.yml` | actionlint, action-validator, yamllint, ansible-lint | Common-Automation reusable `ci-yaml.yml` |
+| `.github/workflows/ci-yaml.yml` | actionlint, action-validator, yamllint | Common-Automation reusable `ci-yaml.yml` |
+| `.github/workflows/ci-ansible.yml` | ansible-lint | Common-Ansible reusable `ci-ansible.yml` |
 | `.github/workflows/ci-bash.yml` | shellcheck, check-sh-executable, bats | Common-Automation reusable `ci-bash.yml` |
 
-Each linter auto-skips when its surface is absent, so a repo with no Ansible
-or no Bash still gets a green run.
+Ansible linting is re-homed: it now comes from **Common-Ansible**'s
+`ci-ansible.yml` (a hash-locked controller venv, not a Docker image), not from
+the cross-cutting `ci-yaml.yml`. Each linter auto-skips when its surface is
+absent, so a repo with no Ansible or no Bash still gets a green run.
 
 To reproduce the exact CI locally (Git Bash + Docker), use the main runner. It
 runs the full lint suite AND the bats tests - the local equivalent of this
@@ -406,6 +409,7 @@ ansible.cfg                     Lint shim: keeps the fleet ansible-lint gate act
                                 NOT used at runtime - the bridge uses the substrate's ansible.cfg.
 .github/workflows/
   ci-yaml.yml                   Delegates to Common-Automation reusable ci-yaml.yml
+  ci-ansible.yml                Delegates to Common-Ansible reusable ci-ansible.yml
   ci-bash.yml                   Delegates to Common-Automation reusable ci-bash.yml
 scripts/
   run-ci-yaml-and-bash.sh / .bat            MAIN local runner: full lint suite + bats tests
