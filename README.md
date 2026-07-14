@@ -413,7 +413,8 @@ ansible.cfg                     Lint shim: keeps the fleet ansible-lint gate act
   ci-bash.yml                   Delegates to Common-Automation reusable ci-bash.yml
 scripts/
   run-ci-yaml-and-bash.sh / .bat            MAIN local runner: full lint suite + bats tests
-  run-lint-yaml-and-bash.sh / .bat          Lint half only
+  run-lint-yaml-and-bash.sh / .bat          Lint half only (cross-cutting linters + ansible-lint)
+  run-lint-ansible.sh                       ansible-lint via the shared Common-Ansible controller venv
   run-tests-bash.sh / .bat                  Bats test half only
   Run-Tests.ps1  Run-IntegrationTests.ps1   Pester unit / integration runners
   fix-permissions.sh / .bat                 Re-stage +x on tracked *.sh via the shared engine
