@@ -129,6 +129,9 @@
         that:
           - log_fresh | length == 1
           - log_fresh[0].argv[0] == '--unattended'
+          # --replace lets --unattended re-claim a name GitHub still
+          # holds from a prior VM incarnation instead of refusing.
+          - "'--replace' in log_fresh[0].argv"
           - "'--url' in log_fresh[0].argv"
           - "'--token' in log_fresh[0].argv"
           - "'--name' in log_fresh[0].argv"
@@ -177,6 +180,7 @@
           - "'--token' in log_re[0].argv"
           - "'--unattended' in log_re[0].argv"
           - log_re[1].argv[0] == '--unattended'
+          - "'--replace' in log_re[1].argv"
           - "'--url' in log_re[1].argv"
 
     # .runner marker state after both runs: present for every

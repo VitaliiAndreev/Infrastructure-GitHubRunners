@@ -76,8 +76,17 @@ and picks one of three branches:
 | Branch                                | On-disk `.runner` | GitHub registration | Action                                                              |
 |---------------------------------------|-------------------|---------------------|---------------------------------------------------------------------|
 | **healthy**                           | present           | present             | skip - no token mint, no `config.sh`                                |
-| **register**                          | absent            | absent or present   | mint registration token, run `config.sh --unattended`               |
+| **register**                          | absent            | absent or present   | mint registration token, run `config.sh --unattended --replace`     |
 | **re-register** (lost local state)    | present           | absent              | mint removal + registration tokens, run `config.sh remove` then `--unattended` |
+
+The register branch runs `config.sh --unattended` with `--replace`
+because a runner name is declarative (from `vm_runner_entries`) and
+outlives any single VM incarnation: a fresh disk (`.runner` absent)
+re-registering a name GitHub still holds from a prior incarnation
+would otherwise hit `config.sh`'s "A runner exists with the same name"
+refusal, which it cannot clear under `--unattended` (no interactive
+replace prompt). `--replace` re-claims the name and is a no-op when it
+is genuinely free, so it is safe for the fresh-and-absent case too.
 
 Probes (one round-trip each per entry, both controller-side):
 
@@ -235,7 +244,7 @@ bound there):
   runner list - mint registration token, run `config.sh --unattended`;
   the mock records one `GET /runners` and one
   `POST /registration-token`; the stub `config.sh` log captures the
-  expected argv (`--url`, `--token`, `--name`, `--labels`).
+  expected argv (`--replace`, `--url`, `--token`, `--name`, `--labels`).
 - **re-register** - `.runner` present + mock returns an empty runner
   list - mint both tokens, run `config.sh remove` then `--unattended`;
   the mock records both POSTs and the stub `config.sh` log captures
