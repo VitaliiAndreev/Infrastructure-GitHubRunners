@@ -100,13 +100,25 @@
 # runner with GitHub. The four documented flags (--url, --token,
 # --name, --labels) match the problem.md contract. runnerLabels is
 # joined with `,` because the actions/runner CLI takes a comma-
-# separated list. argv form keeps the token out of any shell history;
-# no_log keeps it out of Ansible's own output.
+# separated list. --replace re-claims the name when GitHub already
+# holds a registration for it: a runner name is declarative (from
+# vm_runner_entries) and outlives any single VM incarnation, so a
+# fresh disk re-registering an existing name would otherwise hit
+# config.sh's "A runner exists with the same name" refusal (it cannot
+# answer the interactive replace prompt under --unattended). --replace
+# is a no-op on a genuinely free name, so it is safe for the fresh
+# case too. argv form keeps the token out of any shell history;
+# no_log keeps it out of Ansible's own output. failed_when: false +
+# register defers the failure to the surfacing task below: no_log
+# censors the result, so failing here would print only an opaque
+# "censored" line with no cause. Mirrors the remove direction's
+# graceful-path capture (_remove-one.yml) so the two stay symmetric.
 - name: Run config.sh --unattended (register branch)
   ansible.builtin.command:
     argv:
       - ./config.sh
       - --unattended
+      - --replace
       - --url
       - "{{ entry.githubUrl }}"
       - --token
@@ -120,4 +132,27 @@
   become_user: "{{ entry.runnerUsername }}"
   changed_when: true
   no_log: true
+  register: runner_registration_config_add
+  failed_when: false
   when: runner_registration_should_register
+
+# Surface the cause when config.sh --unattended failed. The registration
+# token lives only in argv (the result's `cmd`), never in config.sh's own
+# stdout/stderr, so re-emitting rc + msg + stdout + stderr here (this task
+# is NOT no_log) exposes the real error - name collision, missing deps,
+# expired token - without leaking the token. Deliberately omits `cmd`.
+- name: Fail with config.sh output when the registration errored
+  ansible.builtin.fail:
+    # `msg` carries a module-level error (could not exec config.sh:
+    # permission denied, no such file) where there is no rc/stdout; the
+    # rc/stdout/stderr carry a command-level failure (config.sh ran and
+    # exited non-zero). Surface all four so either shape is legible.
+    msg: |-
+      config.sh --unattended failed for {{ entry.runnerName }}
+      (rc={{ runner_registration_config_add.rc | default('none') }}).
+      msg:    {{ runner_registration_config_add.msg | default('') }}
+      stdout: {{ runner_registration_config_add.stdout | default('') }}
+      stderr: {{ runner_registration_config_add.stderr | default('') }}
+  when:
+    - runner_registration_should_register
+    - runner_registration_config_add.rc | default(0) != 0
