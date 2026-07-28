@@ -8,6 +8,7 @@ provisioned by
 
 - [Requirements](#requirements)
 - [Prerequisites](#prerequisites)
+- [Docker socket access for runner users](#docker-socket-access-for-runner-users)
 - [Quick start](#quick-start)
 - [Config schema](#config-schema)
 - [Token requirements](#token-requirements)
@@ -45,6 +46,52 @@ PowerShell 7+ (`pwsh`).
 - Deploy passwords for `u-runner-deploy` stored in the **VmUsers** vault by
   Infrastructure-Vm-Users — this repo reads them at runtime and never stores
   them itself.
+
+---
+
+## Docker socket access for runner users
+
+Runners that execute container-based CI - the Common-Automation lint
+composites (`actionlint`, `yamllint`, `ansible-lint`, ...) all run their
+linters inside Docker - need the runner service user to reach
+`/var/run/docker.sock`. That access comes from membership in the `docker`
+OS group, and the grant is split across three repos on purpose:
+
+| Repo | Owns |
+|---|---|
+| **Infrastructure-Vm-Provisioner** | Installs the Docker daemon; the `docker` group is created as a side effect. Does **not** set membership. |
+| **Infrastructure-Vm-Users** | **Single authority for group membership.** Its `users` role sets each user's supplementary `groups` with `append: false`, so that config is the complete, authoritative set. |
+| **Infrastructure-GitHubRunners** (this repo) | **Validates**, never grants. |
+
+Because Vm-Users reconciles supplementary groups with `append: false`, a
+membership added anywhere else is stripped on its next run. So the durable
+grant is a `docker` entry in the runner user's supplementary `groups` in
+the **VmUsersConfig** for that VM - for example:
+
+```jsonc
+{
+  "vmName": "ubuntu-01-ci",
+  "users": [
+    {
+      "username": "u-actions-runner",   // must match runnerUsername here
+      "shell":    "/usr/sbin/nologin",
+      "homeDir":  "/home/u-actions-runner",
+      "groups":   ["docker"]            // supplementary; grants socket access
+    }
+  ]
+}
+```
+
+This repo's `register-runners` play fails fast, before touching GitHub,
+when a runner user on a docker-capable host is missing from the `docker`
+group (see
+[`playbooks/tasks/_assert-docker-socket-access.yml`](hyper-v/ubuntu/Ansible/playbooks/tasks/_assert-docker-socket-access.yml)).
+The check is skipped on hosts with no `docker` group (docker not
+installed). This closes a silent-drift gap: `GitHubRunnersConfig` and
+`VmUsersConfig` are separate secrets keyed independently by `vmName`, so a
+runner can be added without granting it docker access - which otherwise
+surfaces only as an opaque `permission denied ... /var/run/docker.sock`
+mid-CI, not at registration.
 
 ---
 
