@@ -111,7 +111,11 @@ if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
 # Step 3 - Infrastructure.GitHub (Invoke-GitHubApi, Get-GitHubAppToken,
 # Get-PendingDeployment, Set-DeploymentStatus, Invoke-RunnerTarballEnsure,
 # Invoke-RunnerTarballDeploy)
-Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '0.2.0'
+#
+# Floor is 1.2.0: that release adds Get-GitHubRunnerActivity, which
+# runner-dashboard.ps1 calls to join each registered runner to the job it is
+# executing. 1.1.0 and earlier have no way to answer that question.
+Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '1.2.0'
 
 # Infrastructure.HyperV (Invoke-SshClientCommand used by
 # Invoke-RunnerTarballDeploy, Test-VmSshPort used by Test-RunnerVmConnectivity,

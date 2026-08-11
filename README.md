@@ -10,6 +10,9 @@ provisioned by
 - [Prerequisites](#prerequisites)
 - [Docker socket access for runner users](#docker-socket-access-for-runner-users)
 - [Quick start](#quick-start)
+- [Live runner dashboard](#live-runner-dashboard)
+  - [How it relates to runner-status.sh](#how-it-relates-to-runner-statussh)
+  - [Rate limit](#rate-limit)
 - [Config schema](#config-schema)
 - [Token requirements](#token-requirements)
 - [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
@@ -112,6 +115,58 @@ mid-CI, not at registration.
 
 Both scripts prompt for a GitHub token at startup. The token is held in
 memory only and is never written to disk or logged.
+
+---
+
+## Live runner dashboard
+
+`hyper-v\ubuntu\shared\runner-dashboard.ps1` is a read-only board that
+repaints on a timer: a row per registered runner (online / offline / busy,
+plus the workflow, job, step and elapsed time when it is working), the jobs
+queued against this fleet's labels, and any repository that could not be
+polled.
+
+```powershell
+.\hyper-v\ubuntu\shared\runner-dashboard.ps1 -SecretSuffix Production
+
+# Slower refresh, or a single frame for a scripted check.
+.\hyper-v\ubuntu\shared\runner-dashboard.ps1 -SecretSuffix Production -RefreshSeconds 30
+.\hyper-v\ubuntu\shared\runner-dashboard.ps1 -SecretSuffix Production -Once
+```
+
+`Q` quits, `R` refreshes immediately, `Ctrl+C` exits.
+
+Which repositories it polls is derived from the `GitHubRunnersConfig-<Suffix>`
+vault entry, collapsed to distinct `owner/repo`. Registering a runner on a new
+repository via `setup-secrets.ps1` is therefore all it takes for that repo to
+appear on the board - there is no second list to maintain.
+
+### How it relates to `runner-status.sh`
+
+The two answer different questions and neither replaces the other:
+
+| | `runner-status.sh` | `runner-dashboard.ps1` |
+|---|---|---|
+| Transport | SSH into every VM + GitHub API | GitHub API only |
+| Answers | Is each runner *healthy* (systemd unit active, GitHub sees it, VM has egress) | What is each runner *doing* right now |
+| Shape | One-shot report | Repaints every few seconds |
+| Cost | Minutes, one SSH session per VM | Seconds, no VM contact |
+
+Reach for `runner-status.sh` when a runner is down and you need to know why;
+reach for the dashboard when you want to watch work flow through the fleet.
+
+### Rate limit
+
+The GitHub budget is 5000 requests/hour for a PAT. A tick costs two
+conditional list calls per repository plus one live call per active workflow
+run. The conditional calls answer `304 Not Modified` whenever nothing changed
+and 304s are not charged, so a quiet fleet costs almost nothing. The remaining
+budget is shown in the header on every frame, and `-RefreshSeconds` has a
+floor of 5 for the same reason.
+
+The token is resolved from `-Token`, then `GH_TOKEN`, then an interactive
+prompt, and is held in memory only - it is never written to disk, logged, or
+passed on a command line.
 
 ---
 
@@ -418,8 +473,10 @@ holds its own code **and** tests:
 hyper-v/ubuntu/
   shared/                       Used by both impls
     setup-secrets.ps1             Store runner config in the local vault
+    runner-dashboard.ps1          Live board - what each runner is running now
+    dashboard/                    Frame formatting, elapsed rendering, key polling
     Install-ModuleDependencies.ps1
-    Tests/                        setup-secrets.Tests.ps1
+    Tests/                        setup-secrets.Tests.ps1 + dashboard/
   PowerShell/                   PowerShell runner implementation
     register-runners.ps1          Thin entry point; delegates to Invoke-RunnerReconcileRun (up direction)
     deregister-runners.ps1        Thin entry point; delegates to Invoke-RunnerReconcileRun (down direction)
