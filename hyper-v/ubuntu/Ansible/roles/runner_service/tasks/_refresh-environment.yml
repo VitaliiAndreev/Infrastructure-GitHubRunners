@@ -1,0 +1,95 @@
+---
+# Environment delivery, second half. The drop-in laid by
+# _apply-environment-dropin.yml is only read when a unit STARTS, so a
+# later edit of /etc/environment does not reach a runner that is already
+# running - the first CI job after an env change would silently use the
+# old environment, which is the exact failure mode the drop-in was added
+# to remove.
+#
+# There is no signal in systemd for "the file this unit read at start
+# time has since changed", so the role records what each unit was
+# started with and compares. The record lives in the runner's own
+# directory (/opt/runners/<name>/) rather than somewhere central, for
+# two reasons: it is per-unit state, and runner_binary's remove
+# direction deletes that tree, so a torn-down runner leaves no residue
+# behind to confuse the next one that takes its name.
+#
+# This half deliberately stays in this role rather than in the generic
+# provision-env flow that writes /etc/environment: knowing which units
+# to bounce is runner knowledge, and pushing it into the env flow would
+# make a VM-wide mechanism depend on what happens to be installed on
+# the host.
+
+- name: Stat /etc/environment for its current checksum
+  ansible.builtin.stat:
+    path: /etc/environment
+  become: true
+  register: runner_service_environment_stat
+
+# Named once because three tasks below read it. 'absent' rather than an
+# empty string when the file does not exist: the record then states the
+# distinction it is making, and a host that later gains an
+# /etc/environment compares unequal and gets its restart.
+- name: Resolve the environment checksum to compare against
+  ansible.builtin.set_fact:
+    runner_service_environment_checksum: >-
+      {{ runner_service_environment_stat.stat.checksum | default('absent') }}
+
+# failed_when: false covers exactly one expected failure - no record
+# file, which is every runner that has not been through this role since
+# the drop-in was introduced. That reads as "started with an unknown
+# environment", which compares unequal below and earns a restart, i.e.
+# the safe direction. The task runs as root, so a permission failure
+# (the only other way slurp fails here) is not a state this role can
+# reach.
+- name: Read the environment checksum each runner unit was started with
+  ansible.builtin.slurp:
+    src: "/opt/runners/{{ item.item.runnerName }}/.environment-checksum"
+  become: true
+  loop: "{{ runner_service_unit_probes.results }}"
+  loop_control:
+    label: "{{ item.item.runnerName }}"
+  register: runner_service_environment_records
+  failed_when: false
+
+# Two independent reasons a unit's environment is stale, both per-entry
+# rather than per-host: a drop-in that was just written (the unit is
+# running without an EnvironmentFile), or an /etc/environment that has
+# changed since the recorded start. Host-wide restart-if-anything-
+# changed would bounce - and so kill the running job of - every other
+# runner on the box whenever a single new runner is added.
+#
+# The three registers below are all loops over
+# runner_service_unit_probes.results, so index_var addresses the same
+# entry in each.
+- name: Restart runner units whose environment changed since they started
+  ansible.builtin.systemd:
+    name: "{{ item.stdout | trim }}"
+    state: restarted
+  become: true
+  loop: "{{ runner_service_unit_probes.results }}"
+  loop_control:
+    label: "{{ item.item.runnerName }}"
+    index_var: entry_index
+  when: >-
+    runner_service_dropins.results[entry_index].changed
+    or (runner_service_environment_records.results[entry_index].content
+        | default('') | b64decode | trim)
+       != runner_service_environment_checksum
+
+# Written after the restart, not before: a restart that errors aborts
+# the play with the record still stating the older checksum, so the next
+# run retries instead of believing the unit is current. A unit that
+# restarts and then dies is caught by the is-active assert that closes
+# the role.
+- name: Record the environment checksum each runner unit now carries
+  ansible.builtin.copy:
+    content: "{{ runner_service_environment_checksum }}\n"
+    dest: "/opt/runners/{{ item.item.runnerName }}/.environment-checksum"
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  loop: "{{ runner_service_unit_probes.results }}"
+  loop_control:
+    label: "{{ item.item.runnerName }}"

@@ -34,6 +34,35 @@
           under /etc/systemd/system:
           {{ unit_stats.results | map(attribute='stat.exists') | list }}
 
+    # The drop-in directory the register direction renders is not
+    # touched by svc.sh uninstall, so nothing else in the teardown would
+    # notice it surviving. An orphaned <unit>.d is not merely litter: a
+    # future runner registered under the same name inherits whatever it
+    # contains before this role gets a say.
+    - name: Stat the drop-in directory for each previously-installed runner
+      ansible.builtin.stat:
+        path: >-
+          /etc/systemd/system/actions.runner.example-repo.{{
+          item }}.service.d
+      register: dropin_dir_stats
+      loop:
+        - runner-active
+        - runner-stopped
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert every drop-in directory is gone
+      ansible.builtin.assert:
+        that:
+          - >-
+            (dropin_dir_stats.results | map(attribute='stat.exists')
+             | list) == [false, false]
+        fail_msg: >-
+          One or more <unit>.d drop-in directories survived the remove
+          direction under /etc/systemd/system:
+          {{ dropin_dir_stats.results | map(attribute='stat.exists')
+             | list }}
+
     # systemctl is-active for the previously-installed units must
     # report inactive (or "unknown" / "failed" - any non-active state
     # is acceptable; the unit is gone). The role's stop branch is what

@@ -13,10 +13,21 @@
 #                     install branch must skip, the systemd task must
 #                     start it, and the is-active re-check must pass.
 #
-# The stub svc.sh writes a `Type=oneshot RemainAfterExit=yes` unit
-# whose ExecStart is `/bin/true` - active without a long-lived
-# process, which is all the role's reconcile contract observes (and
-# all the molecule verify play asserts).
+# The stub svc.sh writes a `Type=oneshot RemainAfterExit=yes` unit -
+# active without a long-lived process, which is all the role's
+# reconcile contract observes. Its ExecStart dumps the environment the
+# unit was launched with to /tmp/runner-env-<name>.txt: that dump is
+# the only way to observe what an EnvironmentFile= actually delivered,
+# since `systemctl show -p Environment` reports inline Environment=
+# settings only and says nothing about a file the unit reads at exec
+# time. A oneshot re-runs its ExecStart on restart, so the dump always
+# describes the most recent start.
+#
+# /etc/environment is seeded here with one variable so the delivery
+# assertions in verify.yml have something to look for. The
+# runner-active entry is deliberately started BEFORE the role adds its
+# drop-in, which is the already-running-without-an-EnvironmentFile case
+# the role's restart branch exists to fix.
 
 - name: Prepare - tooling, runner directories, pre-staged systemd state
   hosts: all
@@ -55,6 +66,19 @@
       loop:
         - u-runner-shared
         - u-runner-other
+
+    # Stands in for what the provision-env flow (Common-Ansible's
+    # vm_env_vars role) writes on a real VM. lineinfile with
+    # create: true because the base image may or may not ship the file,
+    # and the role must behave the same either way.
+    - name: Seed a declared variable in /etc/environment
+      ansible.builtin.lineinfile:
+        path: /etc/environment
+        line: 'MOLECULE_RUNNER_ENV="seeded-by-prepare"'
+        create: true
+        owner: root
+        group: root
+        mode: "0644"
 
     - name: Create per-runner extract directory
       ansible.builtin.file:
@@ -107,7 +131,7 @@
           [Service]
           Type=oneshot
           RemainAfterExit=yes
-          ExecStart=/bin/true
+          ExecStart=/bin/sh -c 'env > /tmp/runner-env-${name}.txt'
           User=${svc_user}
 
           [Install]

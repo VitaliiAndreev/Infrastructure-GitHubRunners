@@ -13,6 +13,7 @@ GitHub.
 
 - [Var contract](#var-contract)
 - [Register direction](#register-direction)
+- [Environment delivery](#environment-delivery)
 - [Remove direction](#remove-direction)
 - [Idempotence guarantees](#idempotence-guarantees)
 - [Tests](#tests)
@@ -47,7 +48,7 @@ already run.
 
 ## Register direction
 
-For every entry in `vm_runner_entries`, the role drives four phases:
+For every entry in `vm_runner_entries`, the role drives six phases:
 
 1. **Unit probe.** `systemctl list-unit-files --no-legend
    'actions.runner.*<runnerName>.service'` piped through
@@ -64,11 +65,21 @@ For every entry in `vm_runner_entries`, the role drives four phases:
    itself is owner-readable; only the unit-file write needs root.
    Argument: the entry's `runnerUsername`, which `svc.sh` bakes into
    the unit's `User=` line.
-3. **Enable + start.** `ansible.builtin.systemd` with `state: started`,
+3. **Environment drop-in**
+   ([`tasks/_apply-environment-dropin.yml`](tasks/_apply-environment-dropin.yml)).
+   Renders `files/10-environment-file.conf` to
+   `/etc/systemd/system/<unit>.d/10-environment-file.conf` and reloads
+   the daemon when it changed. See
+   [Environment delivery](#environment-delivery).
+4. **Enable + start.** `ansible.builtin.systemd` with `state: started`,
    `enabled: true`. A second probe runs between the install branch and
    this task so the unit name is in scope on both code paths
    (already-installed and just-installed).
-4. **`systemctl is-active` re-check.** One `command` per entry capturing
+5. **Environment refresh**
+   ([`tasks/_refresh-environment.yml`](tasks/_refresh-environment.yml)).
+   Restarts the units whose `/etc/environment` changed since they last
+   started. See [Environment delivery](#environment-delivery).
+6. **`systemctl is-active` re-check.** One `command` per entry capturing
    stdout (with `failed_when: false`), followed by an `assert` per
    entry checking `stdout == 'active'`. The split exists so the failure
    message can name the unit and point at
@@ -81,6 +92,73 @@ even when the unit went active then immediately crashed (the module
 observes the start transition only), so the explicit re-check is the
 contract that catches a service that fails its first work cycle.
 
+## Environment delivery
+
+A VM declares its environment variables in its own config, and the
+provisioner writes them into `/etc/environment` (Common-Ansible's
+`vm_env_vars` role, or the equivalent PowerShell transport - both write
+the same managed block). Nothing about that reaches a workflow job on
+its own:
+
+- `/etc/environment` is parsed by PAM's `pam_env`, for login sessions
+  only. A systemd system service never reads it.
+- actions/runner's `svc.sh install` generates a unit with no
+  `EnvironmentFile=`, and the `runsvc.sh` it launches sources only
+  `.path`.
+
+So the variable is visible over SSH and absent from every job on the
+same host - a discrepancy that reads as a provisioning failure when it
+is really a delivery one. This role closes it with a single static
+drop-in ([`files/10-environment-file.conf`](files/10-environment-file.conf)):
+
+```ini
+[Service]
+EnvironmentFile=-/etc/environment
+```
+
+The leading `-` makes a missing file non-fatal, so the drop-in is safe
+on a host that has never run the provisioner's env flow. Pointing the
+unit at the file rather than templating values into it is what keeps
+this repo from carrying a second copy of what the VM config already
+declares.
+
+**Why a restart is part of the contract.** `EnvironmentFile` is read
+when a unit *starts*. A later edit of `/etc/environment` therefore does
+not reach a running runner, and systemd exposes no signal for "the file
+this unit read at start time has since changed" - the first CI job after
+an env edit would silently use the old value. The role records the
+checksum of `/etc/environment` in
+`/opt/runners/<runnerName>/.environment-checksum` after each start and
+restarts a unit when either:
+
+- its drop-in was written by this run (the unit is running with no
+  `EnvironmentFile` at all), or
+- the recorded checksum differs from the file's current one.
+
+Both conditions are evaluated per entry, not per host: a host-wide
+"restart if anything changed" would bounce - and so kill the running job
+of - every other runner on the box whenever a single new runner is
+added. The record lives in the runner's own directory because it is
+per-unit state and because
+[`runner_binary`](../runner_binary/README.md)'s remove direction deletes
+that tree, so a torn-down runner leaves nothing behind for the next one
+to inherit.
+
+The knowledge of *which units to bounce* deliberately stays here rather
+than in the provisioner flow that writes the file: it is runner
+knowledge, and pushing it outward would make a VM-wide mechanism depend
+on what happens to be installed on the host.
+
+**Security.** `/etc/environment` is world-readable and, through this
+drop-in, flows into every workflow job on the host. Jobs already run as
+the runner user on the same box and could read the file regardless, so
+this adds no exposure - but it does mean nothing secret belongs in a
+VM's declared environment. Secrets stay in GitHub Actions secrets, which
+are masked in logs; `/etc/environment` values are not. If a host ever
+carries a VM-level variable that must not reach jobs, that is the point
+to switch to a per-runner `.env` instead of widening the unit's
+environment wholesale.
+
 ## Remove direction
 
 Selected by [`playbooks/deregister-runners.yml`](../../playbooks/deregister-runners.yml)
@@ -91,7 +169,7 @@ first in the remove order (before `runner_registration` and
 quiesced before the next role touches anything.
 
 Inputs are the same `vm_runner_entries` slice the register direction
-reads. Per entry, the role drives three phases:
+reads. Per entry, the role drives four phases:
 
 1. **Unit probe.** Same `tasks/_probe-unit.yml` the register direction
    uses. An empty `stdout` for an entry means no unit is installed on
@@ -103,7 +181,15 @@ reads. Per entry, the role drives three phases:
    `enabled: false`, `become: true`. Stock module idempotence makes
    already-stopped / already-disabled a silent no-op; only the
    active -> inactive transition reports `changed: true`.
-3. **`svc.sh uninstall`.** `./svc.sh uninstall` with
+3. **Drop-in removal.** `/etc/systemd/system/<unit>.d` deleted whole,
+   not just the file this role renders: an empty `<unit>.d` is still a
+   drop-in directory for a unit that no longer exists, and a future
+   runner registered under the same name would inherit whatever it
+   holds. `svc.sh uninstall` removes the unit file only and knows
+   nothing about `<unit>.d`, so nothing else in the teardown would
+   notice it surviving. Runs before the uninstall so the
+   `daemon-reload` svc.sh performs is the last systemd-visible action.
+4. **`svc.sh uninstall`.** `./svc.sh uninstall` with
    `chdir: /opt/runners/<runnerName>` and `become: true`. svc.sh resolves
    the runner root via `$(pwd)`, so the chdir is the contract (same as
    the install branch in the register direction). Removes the unit file
@@ -116,9 +202,10 @@ is also a silent no-op - the next role
 ([`runner_binary`](../runner_binary/README.md)'s remove direction) is
 responsible for the on-disk extract.
 
-Local marker files (`.runner`, `.credentials`) are not touched on this
-path; they live inside `/opt/runners/<name>/` and disappear when
-`runner_binary`'s remove direction deletes the directory.
+Local marker files (`.runner`, `.credentials`,
+`.environment-checksum`) are not touched on this path; they live inside
+`/opt/runners/<name>/` and disappear when `runner_binary`'s remove
+direction deletes the directory.
 
 ## Idempotence guarantees
 
@@ -129,6 +216,13 @@ path; they live inside `/opt/runners/<name>/` and disappear when
   because the probe stdout is non-empty, the systemd task reports `ok`
   for already-enabled+started units, and the is-active capture is also
   `changed_when: false`.
+- **Register direction.** Environment delivery adds no churn to that:
+  the drop-in copy is content-identical run to run, so the
+  `daemon_reload` guarded on it skips, the recorded checksum matches
+  the file so no unit is restarted, and rewriting the record with the
+  same content reports `ok`. The first run after the drop-in is
+  introduced does report changed (render, reload, restart, record) -
+  once.
 - **Register direction.** The register direction never stops, disables,
   or removes a unit. Tearing a registered runner down is the remove
   direction's job (below).
@@ -157,6 +251,14 @@ its file under `/etc/systemd/system`) - the active-without-a-long-lived
 -process unit is all the role's reconcile and teardown contracts
 observe.
 
+The default scenario's stub unit runs
+`ExecStart=/bin/sh -c 'env > /tmp/runner-env-<name>.txt'`. That dump is
+the only way to observe what an `EnvironmentFile=` actually delivered:
+`systemctl show -p Environment` reports inline `Environment=` settings
+only and says nothing about a file the unit reads at exec time. A
+`Type=oneshot` re-runs its `ExecStart` on restart, so the dump always
+describes the most recent start.
+
 [`Tests/molecule/runner_service/default/`](../../Tests/molecule/runner_service/default/)
 exercises the register direction:
 
@@ -176,15 +278,31 @@ exercises the register direction:
   [`runner_entry_resolve`](../runner_entry_resolve/README.md)
   scenario; the runner_service scenario also asserts no
   `actions.runner.*leak*.service` exists after converge).
+- **Environment delivery.** `prepare` seeds one variable in
+  `/etc/environment`; `verify` asserts every unit's drop-in carries the
+  `EnvironmentFile` line, that every unit's env dump carries the
+  variable, and that the recorded checksum matches the file. The
+  runner-active entry is the load-bearing one: prepare started it
+  before the drop-in existed, so its dump carries the variable only
+  because the role noticed the new drop-in and restarted it.
+- **Stale environment.** `verify` then edits `/etc/environment` and
+  re-applies the role, asserting every dump picks up the new value.
+  Mutating, so it lives in `verify.yml` rather than `converge.yml`:
+  `molecule idempotence` runs converge twice, and a converge that edits
+  the file would report changed on the second pass by construction.
 
 [`Tests/molecule/runner_service/remove/`](../../Tests/molecule/runner_service/remove/)
-exercises the remove direction. The prepare step runs the role's
-register direction against a pre-seeded `/opt/runners/<name>/` (stub
-svc.sh, same shape as the default scenario) to land enabled+started
-units; converge then invokes the role with `tasks_from: remove`:
+exercises the remove direction. The prepare step drives the stub svc.sh
+directly against a pre-seeded `/opt/runners/<name>/` to land
+enabled+started units, and stages the `<unit>.d` drop-in the register
+direction would have left (the stub models actions/runner's svc.sh,
+which knows nothing about drop-in directories, so without this the
+teardown assertion would be asserting the absence of something never
+created). Converge then invokes the role with `tasks_from: remove`:
 
-- **Active entry.** Unit present + active - stop + disable + uninstall
-  all run, the unit file is absent under `/etc/systemd/system`, and
+- **Active entry.** Unit present + active - stop + disable + drop-in
+  removal + uninstall all run, the unit file and its `<unit>.d`
+  directory are both absent under `/etc/systemd/system`, and
   `systemctl list-unit-files` returns no match for the runner name.
 - **Inactive entry.** Unit present + inactive - stop is a no-op,
   uninstall runs, final state is no matching unit file.
