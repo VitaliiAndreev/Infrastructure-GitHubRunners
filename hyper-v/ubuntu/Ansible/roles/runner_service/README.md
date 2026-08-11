@@ -2,8 +2,8 @@
 
 Reconciles the systemd service for a self-hosted GitHub Actions runner.
 Third role applied by
-[`playbooks/register-runners.yml`](../../playbooks/register-runners.yml)
-(once that playbook lands in step 6); runs after
+[`playbooks/register-runners.yml`](../../playbooks/register-runners.yml);
+runs after
 [`runner_registration`](../runner_registration/README.md) (which lays
 `config.sh` + `.runner` on disk - both are required for `svc.sh install`
 to succeed) and is the last step before the runner reports online to

@@ -2,13 +2,14 @@
 
 Registers and deregisters self-hosted GitHub Actions runners on Ubuntu VMs
 provisioned by
-[Infrastructure-Vm-Provisioner](https://github.com/VitalyAndreev/Infrastructure-Vm-Provisioner).
+[Infrastructure-Vm-Provisioner](https://github.com/Klark-Morrigan/Infrastructure-Vm-Provisioner).
 
 ## Index
 
 - [Requirements](#requirements)
 - [Prerequisites](#prerequisites)
 - [Docker socket access for runner users](#docker-socket-access-for-runner-users)
+- [Environment variables in workflow jobs](#environment-variables-in-workflow-jobs)
 - [Quick start](#quick-start)
 - [Live runner dashboard](#live-runner-dashboard)
   - [How it relates to runner-status.sh](#how-it-relates-to-runner-statussh)
@@ -95,6 +96,51 @@ installed). This closes a silent-drift gap: `GitHubRunnersConfig` and
 runner can be added without granting it docker access - which otherwise
 surfaces only as an opaque `permission denied ... /var/run/docker.sock`
 mid-CI, not at registration.
+
+---
+
+## Environment variables in workflow jobs
+
+A workflow job that needs a machine-specific path - where a game's install
+root lives, where a shared toolchain was staged - reads it from an
+environment variable the VM declares. Getting one there is split across two
+repos, for the same reason docker group membership is:
+
+| Repo | Owns |
+|---|---|
+| **Infrastructure-Vm-Provisioner** | **Single authority for the value.** Its `provision-env` flow writes the VM's declared `envVars` into a managed block in `/etc/environment`. |
+| **Infrastructure-GitHubRunners** (this repo) | **Delivers**, never declares. Points each runner unit at that file and restarts a unit whose environment has since changed. |
+
+Declare the variable beside the files it describes, in the
+**VmProvisionerConfig** for that VM:
+
+```jsonc
+{
+  "vmName": "ubuntu-02-ci",
+  "envVars": {
+    "blockName": "ci-jars",
+    "entries": [
+      { "name": "STARSECTOR_HOME", "value": "/opt/ci-jars/starsector" }
+    ]
+  }
+}
+```
+
+The delivery half is not optional plumbing. `/etc/environment` is parsed by
+PAM's `pam_env`, for **login sessions only** - a systemd system service
+never reads it, and actions/runner's `svc.sh install` generates a unit with
+no `EnvironmentFile=`. Declaring the variable and stopping there produces a
+misleading success: SSH in and `echo $STARSECTOR_HOME` prints the right
+path while CI keeps failing with a byte-identical error. This repo's
+[`runner_service`](hyper-v/ubuntu/Ansible/roles/runner_service/README.md)
+role closes that with a systemd drop-in, and - because `EnvironmentFile` is
+read only at unit **start** - restarts a runner whose recorded checksum of
+`/etc/environment` no longer matches. Without that, the first CI run after
+an env edit is silently stale.
+
+`/etc/environment` is world-readable and flows into every job on the host,
+so **nothing secret belongs in a VM's `envVars`**. Secrets stay in GitHub
+Actions secrets, which are masked in logs; these values are not.
 
 ---
 
@@ -259,6 +305,13 @@ Re-running `register-runners.ps1` is safe:
   re-registering.
 - Runners not registered at all go through full registration, service
   install, and start.
+- A runner is restarted when `/etc/environment` has changed since it last
+  started (see
+  [Environment variables in workflow jobs](#environment-variables-in-workflow-jobs)).
+  This is the one case where a re-run deliberately interrupts a healthy
+  runner: the alternative is a job silently using the old value. It is
+  decided per runner, so registering a new runner never disturbs the ones
+  already serving.
 
 ---
 
@@ -343,7 +396,7 @@ below are relative to that slice.
 
 | Kind | Here | Purpose |
 |---|---|---|
-| Roles | `roles/runner_entry_resolve`, `roles/runner_binary`, `roles/runner_registration`, `roles/runner_service` | Resolve a host's runner entries; cache/extract the tarball; reconcile GitHub registration; install the systemd unit |
+| Roles | `roles/runner_entry_resolve`, `roles/runner_binary`, `roles/runner_registration`, `roles/runner_service` | Resolve a host's runner entries; cache/extract the tarball; reconcile GitHub registration; install the systemd unit and deliver `/etc/environment` to it |
 | Playbooks | `playbooks/register-runners.yml`, `playbooks/deregister-runners.yml`, `playbooks/runner-status.yml` (+ `playbooks/tasks/`) | Compose the roles per direction |
 | Wrappers | `ops/register-runners.sh`, `ops/deregister-runners.sh`, `ops/runner-status.sh` (+ `.bat`) | Operator entry points |
 | Domain helpers | `ops/_build-extra-vars-GitHubRunners.sh`, `ops/_require-gh-token.sh`, `ops/_stage-runner-tarball.sh`, `ops/_resolve-runner-version.ps1`, `ops/_ensure-runner-tarball.ps1` | Runner-domain extra-vars, token acquisition, tarball staging |

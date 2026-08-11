@@ -12,6 +12,10 @@
 #   runner-stopped  - unit pre-installed but stopped. The role's
 #                     install branch must skip, the systemd task must
 #                     start it, and the is-active re-check must pass.
+#   runner-late     - directory only, and absent from converge's
+#                     config. verify.yml declares it and re-applies the
+#                     role to prove a runner joining a busy host does
+#                     not bounce the ones already on it.
 #
 # The stub svc.sh writes a `Type=oneshot RemainAfterExit=yes` unit -
 # active without a long-lived process, which is all the role's
@@ -34,8 +38,9 @@
   gather_facts: false
   vars:
     # Three positive entries cover the three branches the role's
-    # reconcile produces; the fourth entry (runner-leak, vmName !=
-    # instance) is asserted absent in verify.yml.
+    # reconcile produces, plus one staged for verify.yml. The
+    # runner-leak entry (vmName != instance) has no directory at all -
+    # it exists only in converge.yml and is asserted absent here.
     runner_dirs:
       - name: runner-install
         user: u-runner-shared
@@ -46,6 +51,13 @@
       - name: runner-stopped
         user: u-runner-other
         pre_state: stopped
+      # Not declared in converge.yml: verify.yml adds it to the config
+      # and re-applies the role, which is the "a runner joins a host
+      # that is already serving" case. Its directory has to exist here
+      # because the role expects runner_binary to have laid it.
+      - name: runner-late
+        user: u-runner-shared
+        pre_state: none
   tasks:
     # systemd, systemd-sysv, and sudo are baked into the scenario's
     # Dockerfile so they are present from container create onward;
