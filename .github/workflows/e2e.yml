@@ -7,13 +7,20 @@ name: Infrastructure-E2E
 # Pins runnersFlow=ansible so this repo's PR exercises its Ansible runner flow
 # (register-runners.sh / deregister-runners.sh / runner-status.sh on the
 # Common-Ansible substrate); that flow needs WslDistro in the E2EConfig vault.
-# usersFlow, toolchainsFlow and filesFlow are also ansible - their owners' checks
-# exercise those flows - so a runner PR runs the full Ansible stack with the
-# runner flow as the variable under test. The toolchain flow runs
+# usersFlow, toolchainsFlow, filesFlow and envVarsFlow are also ansible - their
+# owners' checks exercise those flows - so a runner PR runs the full Ansible
+# stack with the runner flow as the variable under test. The toolchain flow runs
 # provision-toolchains.sh against the Common-Ansible jdk / dotnet_sdk /
 # dotnet_tools roles; the files flow runs provision-files.sh against the vm_files
-# role. This pin does not cover the PowerShell register-runners.ps1 path - use an
-# explicit override or a matrix for that.
+# role; the env flow runs provision-env.sh against the vm_env_vars role. This pin
+# does not cover the PowerShell register-runners.ps1 path - use an explicit
+# override or a matrix for that.
+#
+# The env layer is worth pinning here rather than left to default even though
+# the default is the same value: this repo owns the DELIVERY half of that story
+# (roles/runner_service's systemd drop-in and its restart-on-change), so a
+# reader of this file should see that the layer whose output its runners consume
+# is under test rather than have to know the agent's defaults.
 on:
   pull_request:
 
@@ -27,5 +34,6 @@ jobs:
           "usersFlow":"ansible",
           "runnersFlow":"ansible",
           "toolchainsFlow":"ansible",
-          "filesFlow":"ansible"
+          "filesFlow":"ansible",
+          "envVarsFlow":"ansible"
         }
