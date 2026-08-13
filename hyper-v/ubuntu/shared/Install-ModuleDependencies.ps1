@@ -112,10 +112,14 @@ if ($_loaded.Count -ne 1 -or $_loaded[0].Version -ne $_common.Version) {
 # Get-PendingDeployment, Set-DeploymentStatus, Invoke-RunnerTarballEnsure,
 # Invoke-RunnerTarballDeploy)
 #
-# Floor is 1.2.0: that release adds Get-GitHubRunnerActivity, which
-# runner-dashboard.ps1 calls to join each registered runner to the job it is
-# executing. 1.1.0 and earlier have no way to answer that question.
-Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '1.2.0'
+# Floor is 1.2.1: that release makes Invoke-GitHubApi retry transient network
+# failures, which matters most on the registration path - a DNS hiccup while
+# minting a registration token used to abort the whole register-runners run.
+# Writes are retried only on failures that never reached GitHub, so a
+# remove-token POST cannot be double-executed. It supersedes the older 1.2.0
+# floor, which was there for Get-GitHubRunnerActivity - the call
+# runner-dashboard.ps1 uses to join each runner to the job it is executing.
+Invoke-ModuleInstall -ModuleName 'Infrastructure.GitHub' -MinimumVersion '1.2.1'
 
 # Infrastructure.HyperV (Invoke-SshClientCommand used by
 # Invoke-RunnerTarballDeploy, Test-VmSshPort used by Test-RunnerVmConnectivity,
