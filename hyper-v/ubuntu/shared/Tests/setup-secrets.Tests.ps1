@@ -29,16 +29,28 @@
 BeforeAll {
     $script:realPath = Join-Path $PSScriptRoot '..\setup-secrets.ps1'
 
-    $script:shimDir = Join-Path ([IO.Path]::GetTempPath()) `
+    # The shim tree mirrors the real one two levels deep, not just the script's
+    # own directory: setup-secrets.ps1 lives in shared\ and reaches SIDEWAYS
+    # into ..\PowerShell\registration\... for the config parser. A flat shim
+    # dir leaves that dot-source resolving to a path above the temp root, and
+    # every behavioural test dies on a CommandNotFoundException before
+    # reaching its assertion.
+    $script:shimRoot = Join-Path ([IO.Path]::GetTempPath()) `
         ("setup-secrets-test-" + [Guid]::NewGuid().ToString('N'))
-    New-Item -ItemType Directory `
-        -Path (Join-Path $script:shimDir 'registration\common\config') -Force | Out-Null
+    $script:shimDir  = Join-Path $script:shimRoot 'shared'
 
+    New-Item -ItemType Directory -Path $script:shimDir -Force | Out-Null
+    New-Item -ItemType Directory -Force -Path (
+        Join-Path $script:shimRoot 'PowerShell\registration\common\config') | Out-Null
+
+    # Empty stubs - one per dot-source the script performs, at the path it
+    # actually uses. Keep this list in step with the dot-source block at the
+    # top of setup-secrets.ps1.
     foreach ($rel in @(
-        'registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1',
-        'Install-ModuleDependencies.ps1'
+        'PowerShell\registration\common\config\ConvertFrom-GitHubRunnersConfigJson.ps1',
+        'shared\Install-ModuleDependencies.ps1'
     )) {
-        Set-Content -LiteralPath (Join-Path $script:shimDir $rel) -Value '' `
+        Set-Content -LiteralPath (Join-Path $script:shimRoot $rel) -Value '' `
             -Encoding UTF8
     }
 
@@ -73,8 +85,8 @@ BeforeAll {
 }
 
 AfterAll {
-    if ($script:shimDir -and (Test-Path -LiteralPath $script:shimDir)) {
-        Remove-Item -LiteralPath $script:shimDir -Recurse -Force `
+    if ($script:shimRoot -and (Test-Path -LiteralPath $script:shimRoot)) {
+        Remove-Item -LiteralPath $script:shimRoot -Recurse -Force `
             -ErrorAction SilentlyContinue
     }
 }

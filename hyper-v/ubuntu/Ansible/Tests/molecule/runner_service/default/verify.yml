@@ -8,6 +8,26 @@
 - name: Verify - runner_service role post-conditions
   hosts: all
   gather_facts: false
+  vars:
+    declared_runners:
+      - runner-install
+      - runner-active
+      - runner-stopped
+    # Re-declared rather than inherited: converge.yml's play vars are
+    # out of scope here, and the environment-refresh case below has to
+    # apply the role a second time. Only the three fields the role and
+    # its runner_entry_resolve dep read are repeated; the entry shape
+    # itself is covered by the runner_entry_resolve scenario.
+    github_runners_config:
+      - vmName: instance
+        runnerName: runner-install
+        runnerUsername: u-runner-shared
+      - vmName: instance
+        runnerName: runner-active
+        runnerUsername: u-runner-shared
+      - vmName: instance
+        runnerName: runner-stopped
+        runnerUsername: u-runner-other
   tasks:
     # Every declared runner on `instance` has a matching unit file.
     # The role's probe runs the same glob; if the unit is missing the
@@ -18,10 +38,7 @@
           /etc/systemd/system/actions.runner.example-repo.{{
           item }}.service
       register: unit_stats
-      loop:
-        - runner-install
-        - runner-active
-        - runner-stopped
+      loop: "{{ declared_runners }}"
       loop_control:
         label: "{{ item }}"
 
@@ -47,10 +64,7 @@
           systemctl is-active
           actions.runner.example-repo.{{ item }}.service
       register: active_checks
-      loop:
-        - runner-install
-        - runner-active
-        - runner-stopped
+      loop: "{{ declared_runners }}"
       loop_control:
         label: "{{ item }}"
       changed_when: false
@@ -110,3 +124,249 @@
         fail_msg: >-
           Unexpected actions.runner unit set after converge:
           {{ actions_runner_units.stdout_lines }}
+
+    # Environment delivery. Asserting the drop-in file exists proves
+    # only that the role rendered it; the dumps below are what prove
+    # systemd actually read /etc/environment into the unit's exec
+    # environment, which is the thing the feature was added for.
+    - name: Read the environment drop-in for each declared runner
+      ansible.builtin.slurp:
+        src: >-
+          /etc/systemd/system/actions.runner.example-repo.{{ item
+          }}.service.d/10-environment-file.conf
+      register: dropin_files
+      loop: "{{ declared_runners }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert every drop-in points at /etc/environment
+      ansible.builtin.assert:
+        that:
+          - >-
+            'EnvironmentFile=-/etc/environment'
+            in (item.content | b64decode)
+        fail_msg: >-
+          The drop-in for {{ item.item }} does not carry the
+          EnvironmentFile line:
+          {{ item.content | b64decode }}
+      loop: "{{ dropin_files.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # The stub unit's ExecStart dumps its environment on every start.
+    # runner-active is the interesting entry here: prepare started it
+    # before the role existed on this host, so its dump only carries the
+    # variable because the role noticed the new drop-in and restarted it.
+    - name: Read the environment dump each runner unit was started with
+      ansible.builtin.slurp:
+        src: "/tmp/runner-env-{{ item }}.txt"
+      register: env_dumps
+      loop: "{{ declared_runners }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert every runner unit received the declared variable
+      ansible.builtin.assert:
+        that:
+          - >-
+            'MOLECULE_RUNNER_ENV=seeded-by-prepare'
+            in (item.content | b64decode)
+        fail_msg: >-
+          Unit for {{ item.item }} started without MOLECULE_RUNNER_ENV;
+          the EnvironmentFile drop-in did not reach it.
+      loop: "{{ env_dumps.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # The recorded checksum is what lets the next run tell a stale unit
+    # from a current one. A record that does not match the file it
+    # describes would make the role either restart on every run or never
+    # restart at all, and neither shows up as a failure anywhere else.
+    - name: Stat /etc/environment for its checksum
+      ansible.builtin.stat:
+        path: /etc/environment
+      register: environment_stat
+
+    - name: Read the recorded environment checksum for each runner
+      ansible.builtin.slurp:
+        src: "/opt/runners/{{ item }}/.environment-checksum"
+      register: checksum_records
+      loop: "{{ declared_runners }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert each record matches the current /etc/environment
+      ansible.builtin.assert:
+        that:
+          - >-
+            (item.content | b64decode | trim)
+            == environment_stat.stat.checksum
+        fail_msg: >-
+          /opt/runners/{{ item.item }}/.environment-checksum holds
+          '{{ item.content | b64decode | trim }}' but /etc/environment
+          checksums to '{{ environment_stat.stat.checksum }}'.
+      loop: "{{ checksum_records.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # No-collateral-restart case. The restart decision is made per entry
+    # rather than per host so that registering one new runner does not
+    # bounce - and so kill the running job of - every runner already
+    # serving on the box. Nothing else in the suite would notice a
+    # regression to a host-wide restart: every unit would still end up
+    # active and carrying the right environment.
+    #
+    # InvocationID is systemd's own per-start identity, so an unchanged
+    # one is direct proof the unit was not restarted.
+    - name: Capture each runner unit's invocation id  # noqa command-instead-of-module
+      ansible.builtin.command:
+        cmd: >-
+          systemctl show -p InvocationID --value
+          actions.runner.example-repo.{{ item }}.service
+      register: invocation_ids_before
+      loop: "{{ declared_runners }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: false
+
+    # set_fact rather than an include_role param: the entries are read
+    # by the runner_entry_resolve meta dep, and a host fact is in scope
+    # for a role's dependencies without relying on how include_role
+    # forwards its params.
+    - name: Declare a fourth runner on this host
+      ansible.builtin.set_fact:
+        github_runners_config: >-
+          {{ github_runners_config + [{'vmName': 'instance',
+             'runnerName': 'runner-late',
+             'runnerUsername': 'u-runner-shared'}] }}
+
+    - name: Apply the role with the new runner declared
+      ansible.builtin.include_role:
+        name: runner_service
+
+    - name: Re-capture the pre-existing units' invocation ids  # noqa command-instead-of-module
+      ansible.builtin.command:
+        cmd: >-
+          systemctl show -p InvocationID --value
+          actions.runner.example-repo.{{ item }}.service
+      register: invocation_ids_after
+      loop: "{{ declared_runners }}"
+      loop_control:
+        label: "{{ item }}"
+      changed_when: false
+
+    - name: Assert the pre-existing runners were not restarted
+      ansible.builtin.assert:
+        that:
+          - >-
+            (invocation_ids_before.results | map(attribute='stdout')
+             | list)
+            == (invocation_ids_after.results | map(attribute='stdout')
+                | list)
+        fail_msg: >-
+          Registering runner-late restarted a runner that was already
+          serving. Invocation ids before
+          {{ invocation_ids_before.results | map(attribute='stdout')
+             | list }}
+          and after
+          {{ invocation_ids_after.results | map(attribute='stdout')
+             | list }}.
+
+    - name: Read the late runner's environment dump
+      ansible.builtin.slurp:
+        src: /tmp/runner-env-runner-late.txt
+      register: late_env_dump
+
+    - name: Assert the late runner started with the declared variable
+      ansible.builtin.assert:
+        that:
+          - >-
+            'MOLECULE_RUNNER_ENV=seeded-by-prepare'
+            in (late_env_dump.content | b64decode)
+        fail_msg: >-
+          runner-late started without MOLECULE_RUNNER_ENV; a runner
+          registered after the drop-in was introduced still has to get
+          one of its own.
+
+    # Stale-environment case. Mutating state, so it lives here rather
+    # than in converge.yml: `molecule idempotence` runs converge twice
+    # and a converge that edits /etc/environment would report changed on
+    # the second pass by construction.
+    #
+    # EnvironmentFile is read at unit START, so this edit reaches a
+    # running unit only if the role compares the file against its record
+    # and restarts. Without that comparison every assertion above still
+    # passes and the first CI job after an operator edits /etc/environment
+    # silently runs with the old value.
+    - name: Change the declared variable in /etc/environment
+      ansible.builtin.lineinfile:
+        path: /etc/environment
+        regexp: '^MOLECULE_RUNNER_ENV='
+        line: 'MOLECULE_RUNNER_ENV="changed-in-verify"'
+
+    - name: Re-apply the role against the changed environment
+      ansible.builtin.include_role:
+        name: runner_service
+
+    - name: Re-read the environment dump for each runner unit
+      ansible.builtin.slurp:
+        src: "/tmp/runner-env-{{ item }}.txt"
+      register: env_dumps_after_change
+      loop: "{{ declared_runners }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert every runner unit picked up the changed variable
+      ansible.builtin.assert:
+        that:
+          - >-
+            'MOLECULE_RUNNER_ENV=changed-in-verify'
+            in (item.content | b64decode)
+        fail_msg: >-
+          Unit for {{ item.item }} is still carrying the environment it
+          started with; the role did not restart it after
+          /etc/environment changed.
+      loop: "{{ env_dumps_after_change.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+
+    # No-/etc/environment case, last because it takes the file away. A
+    # host that has never run the provisioner's env flow has no
+    # /etc/environment at all, and the role has to stay useful there:
+    # the drop-in's leading '-' is what keeps the unit startable, and
+    # the recorded checksum has to state the absence rather than blow up
+    # on an undefined stat result. Neither is exercised by any other
+    # case, because every other case has the file.
+    #
+    # That the units survive is asserted by the role's own is-active
+    # check inside the include below - a unit that failed to start
+    # would fail the play there.
+    - name: Remove /etc/environment entirely
+      ansible.builtin.file:
+        path: /etc/environment
+        state: absent
+
+    - name: Apply the role against a host with no /etc/environment
+      ansible.builtin.include_role:
+        name: runner_service
+
+    - name: Read the recorded checksum after the file was removed
+      ansible.builtin.slurp:
+        src: "/opt/runners/{{ item }}/.environment-checksum"
+      register: checksum_records_without_file
+      loop: "{{ declared_runners }}"
+      loop_control:
+        label: "{{ item }}"
+
+    - name: Assert each record states the file's absence
+      ansible.builtin.assert:
+        that:
+          - (item.content | b64decode | trim) == 'absent'
+        fail_msg: >-
+          /opt/runners/{{ item.item }}/.environment-checksum holds
+          '{{ item.content | b64decode | trim }}' on a host with no
+          /etc/environment; a host that later gains the file would not
+          compare unequal and would never be restarted.
+      loop: "{{ checksum_records_without_file.results }}"
+      loop_control:
+        label: "{{ item.item }}"

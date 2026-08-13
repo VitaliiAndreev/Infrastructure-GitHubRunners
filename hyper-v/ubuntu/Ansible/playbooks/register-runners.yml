@@ -29,6 +29,20 @@
     - name: Ensure host prerequisites for unprivileged become
       ansible.builtin.import_tasks: tasks/_ensure-acl-present.yml
       tags: always
+    # Resolve this host's runner entries up front so the docker-access
+    # assert below can iterate them. The consumer roles pull the same
+    # helper in via meta dependency; running it here too is a harmless
+    # idempotent set_fact (the fact is recomputed, not accumulated).
+    - name: Resolve runner entries for the docker-access assert
+      ansible.builtin.import_role:
+        name: runner_entry_resolve
+      tags: always
+    # Fail fast, with the exact Vm-Users fix, when a runner user on a
+    # docker-capable host cannot reach the socket its CI jobs need. This
+    # repo validates the grant; Vm-Users owns it (see the task file).
+    - name: Assert runner users can reach the docker socket
+      ansible.builtin.import_tasks: tasks/_assert-docker-socket-access.yml
+      tags: always
   tasks:
     - name: Cache and extract the runner tarball
       ansible.builtin.import_role:

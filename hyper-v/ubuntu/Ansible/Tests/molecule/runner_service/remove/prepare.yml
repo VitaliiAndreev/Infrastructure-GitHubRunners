@@ -145,6 +145,43 @@
       when: item.pre_state in ['started', 'stopped']
       changed_when: true
 
+    # Stage the drop-in the register direction leaves behind. The stub
+    # svc.sh models actions/runner's, which writes and removes the unit
+    # file only - it knows nothing about <unit>.d - so without this the
+    # teardown assertion in verify.yml would be asserting the absence of
+    # something that was never there.
+    - name: Create the drop-in directory for pre-installed entries
+      ansible.builtin.file:
+        path: >-
+          /etc/systemd/system/actions.runner.example-repo.{{ item.name
+          }}.service.d
+        state: directory
+        owner: root
+        group: root
+        mode: "0755"
+      become: true
+      loop: "{{ runner_dirs }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.pre_state in ['started', 'stopped']
+
+    - name: Stage the environment drop-in for pre-installed entries
+      ansible.builtin.copy:
+        dest: >-
+          /etc/systemd/system/actions.runner.example-repo.{{ item.name
+          }}.service.d/10-environment-file.conf
+        content: |
+          [Service]
+          EnvironmentFile=-/etc/environment
+        owner: root
+        group: root
+        mode: "0644"
+      become: true
+      loop: "{{ runner_dirs }}"
+      loop_control:
+        label: "{{ item.name }}"
+      when: item.pre_state in ['started', 'stopped']
+
     # Start runner-active so converge observes an active unit. systemd
     # reports `changed: true` on the inactive -> active transition; the
     # converge's stop+disable task is what reverses that transition.

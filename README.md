@@ -2,13 +2,18 @@
 
 Registers and deregisters self-hosted GitHub Actions runners on Ubuntu VMs
 provisioned by
-[Infrastructure-Vm-Provisioner](https://github.com/VitalyAndreev/Infrastructure-Vm-Provisioner).
+[Infrastructure-Vm-Provisioner](https://github.com/Klark-Morrigan/Infrastructure-Vm-Provisioner).
 
 ## Index
 
 - [Requirements](#requirements)
 - [Prerequisites](#prerequisites)
+- [Docker socket access for runner users](#docker-socket-access-for-runner-users)
+- [Environment variables in workflow jobs](#environment-variables-in-workflow-jobs)
 - [Quick start](#quick-start)
+- [Live runner dashboard](#live-runner-dashboard)
+  - [How it relates to runner-status.sh](#how-it-relates-to-runner-statussh)
+  - [Rate limit](#rate-limit)
 - [Config schema](#config-schema)
 - [Token requirements](#token-requirements)
 - [Multi-repo and multi-purpose runners](#multi-repo-and-multi-purpose-runners)
@@ -48,6 +53,97 @@ PowerShell 7+ (`pwsh`).
 
 ---
 
+## Docker socket access for runner users
+
+Runners that execute container-based CI - the Common-Automation lint
+composites (`actionlint`, `yamllint`, `ansible-lint`, ...) all run their
+linters inside Docker - need the runner service user to reach
+`/var/run/docker.sock`. That access comes from membership in the `docker`
+OS group, and the grant is split across three repos on purpose:
+
+| Repo | Owns |
+|---|---|
+| **Infrastructure-Vm-Provisioner** | Installs the Docker daemon; the `docker` group is created as a side effect. Does **not** set membership. |
+| **Infrastructure-Vm-Users** | **Single authority for group membership.** Its `users` role sets each user's supplementary `groups` with `append: false`, so that config is the complete, authoritative set. |
+| **Infrastructure-GitHubRunners** (this repo) | **Validates**, never grants. |
+
+Because Vm-Users reconciles supplementary groups with `append: false`, a
+membership added anywhere else is stripped on its next run. So the durable
+grant is a `docker` entry in the runner user's supplementary `groups` in
+the **VmUsersConfig** for that VM - for example:
+
+```jsonc
+{
+  "vmName": "ubuntu-01-ci",
+  "users": [
+    {
+      "username": "u-actions-runner",   // must match runnerUsername here
+      "shell":    "/usr/sbin/nologin",
+      "homeDir":  "/home/u-actions-runner",
+      "groups":   ["docker"]            // supplementary; grants socket access
+    }
+  ]
+}
+```
+
+This repo's `register-runners` play fails fast, before touching GitHub,
+when a runner user on a docker-capable host is missing from the `docker`
+group (see
+[`playbooks/tasks/_assert-docker-socket-access.yml`](hyper-v/ubuntu/Ansible/playbooks/tasks/_assert-docker-socket-access.yml)).
+The check is skipped on hosts with no `docker` group (docker not
+installed). This closes a silent-drift gap: `GitHubRunnersConfig` and
+`VmUsersConfig` are separate secrets keyed independently by `vmName`, so a
+runner can be added without granting it docker access - which otherwise
+surfaces only as an opaque `permission denied ... /var/run/docker.sock`
+mid-CI, not at registration.
+
+---
+
+## Environment variables in workflow jobs
+
+A workflow job that needs a machine-specific path - where a game's install
+root lives, where a shared toolchain was staged - reads it from an
+environment variable the VM declares. Getting one there is split across two
+repos, for the same reason docker group membership is:
+
+| Repo | Owns |
+|---|---|
+| **Infrastructure-Vm-Provisioner** | **Single authority for the value.** Its `provision-env` flow writes the VM's declared `envVars` into a managed block in `/etc/environment`. |
+| **Infrastructure-GitHubRunners** (this repo) | **Delivers**, never declares. Points each runner unit at that file and restarts a unit whose environment has since changed. |
+
+Declare the variable beside the files it describes, in the
+**VmProvisionerConfig** for that VM:
+
+```jsonc
+{
+  "vmName": "ubuntu-02-ci",
+  "envVars": {
+    "blockName": "ci-jars",
+    "entries": [
+      { "name": "STARSECTOR_HOME", "value": "/opt/ci-jars/starsector" }
+    ]
+  }
+}
+```
+
+The delivery half is not optional plumbing. `/etc/environment` is parsed by
+PAM's `pam_env`, for **login sessions only** - a systemd system service
+never reads it, and actions/runner's `svc.sh install` generates a unit with
+no `EnvironmentFile=`. Declaring the variable and stopping there produces a
+misleading success: SSH in and `echo $STARSECTOR_HOME` prints the right
+path while CI keeps failing with a byte-identical error. This repo's
+[`runner_service`](hyper-v/ubuntu/Ansible/roles/runner_service/README.md)
+role closes that with a systemd drop-in, and - because `EnvironmentFile` is
+read only at unit **start** - restarts a runner whose recorded checksum of
+`/etc/environment` no longer matches. Without that, the first CI run after
+an env edit is silently stale.
+
+`/etc/environment` is world-readable and flows into every job on the host,
+so **nothing secret belongs in a VM's `envVars`**. Secrets stay in GitHub
+Actions secrets, which are masked in logs; these values are not.
+
+---
+
 ## Quick start
 
 ```powershell
@@ -65,6 +161,58 @@ PowerShell 7+ (`pwsh`).
 
 Both scripts prompt for a GitHub token at startup. The token is held in
 memory only and is never written to disk or logged.
+
+---
+
+## Live runner dashboard
+
+`hyper-v\ubuntu\shared\runner-dashboard.ps1` is a read-only board that
+repaints on a timer: a row per registered runner (online / offline / busy,
+plus the workflow, job, step and elapsed time when it is working), the jobs
+queued against this fleet's labels, and any repository that could not be
+polled.
+
+```powershell
+.\hyper-v\ubuntu\shared\runner-dashboard.ps1 -SecretSuffix Production
+
+# Slower refresh, or a single frame for a scripted check.
+.\hyper-v\ubuntu\shared\runner-dashboard.ps1 -SecretSuffix Production -RefreshSeconds 30
+.\hyper-v\ubuntu\shared\runner-dashboard.ps1 -SecretSuffix Production -Once
+```
+
+`Q` quits, `R` refreshes immediately, `Ctrl+C` exits.
+
+Which repositories it polls is derived from the `GitHubRunnersConfig-<Suffix>`
+vault entry, collapsed to distinct `owner/repo`. Registering a runner on a new
+repository via `setup-secrets.ps1` is therefore all it takes for that repo to
+appear on the board - there is no second list to maintain.
+
+### How it relates to `runner-status.sh`
+
+The two answer different questions and neither replaces the other:
+
+| | `runner-status.sh` | `runner-dashboard.ps1` |
+|---|---|---|
+| Transport | SSH into every VM + GitHub API | GitHub API only |
+| Answers | Is each runner *healthy* (systemd unit active, GitHub sees it, VM has egress) | What is each runner *doing* right now |
+| Shape | One-shot report | Repaints every few seconds |
+| Cost | Minutes, one SSH session per VM | Seconds, no VM contact |
+
+Reach for `runner-status.sh` when a runner is down and you need to know why;
+reach for the dashboard when you want to watch work flow through the fleet.
+
+### Rate limit
+
+The GitHub budget is 5000 requests/hour for a PAT. A tick costs two
+conditional list calls per repository plus one live call per active workflow
+run. The conditional calls answer `304 Not Modified` whenever nothing changed
+and 304s are not charged, so a quiet fleet costs almost nothing. The remaining
+budget is shown in the header on every frame, and `-RefreshSeconds` has a
+floor of 5 for the same reason.
+
+The token is resolved from `-Token`, then `GH_TOKEN`, then an interactive
+prompt, and is held in memory only - it is never written to disk, logged, or
+passed on a command line.
 
 ---
 
@@ -157,6 +305,13 @@ Re-running `register-runners.ps1` is safe:
   re-registering.
 - Runners not registered at all go through full registration, service
   install, and start.
+- A runner is restarted when `/etc/environment` has changed since it last
+  started (see
+  [Environment variables in workflow jobs](#environment-variables-in-workflow-jobs)).
+  This is the one case where a re-run deliberately interrupts a healthy
+  runner: the alternative is a job silently using the old value. It is
+  decided per runner, so registering a new runner never disturbs the ones
+  already serving.
 
 ---
 
@@ -241,7 +396,7 @@ below are relative to that slice.
 
 | Kind | Here | Purpose |
 |---|---|---|
-| Roles | `roles/runner_entry_resolve`, `roles/runner_binary`, `roles/runner_registration`, `roles/runner_service` | Resolve a host's runner entries; cache/extract the tarball; reconcile GitHub registration; install the systemd unit |
+| Roles | `roles/runner_entry_resolve`, `roles/runner_binary`, `roles/runner_registration`, `roles/runner_service` | Resolve a host's runner entries; cache/extract the tarball; reconcile GitHub registration; install the systemd unit and deliver `/etc/environment` to it |
 | Playbooks | `playbooks/register-runners.yml`, `playbooks/deregister-runners.yml`, `playbooks/runner-status.yml` (+ `playbooks/tasks/`) | Compose the roles per direction |
 | Wrappers | `ops/register-runners.sh`, `ops/deregister-runners.sh`, `ops/runner-status.sh` (+ `.bat`) | Operator entry points |
 | Domain helpers | `ops/_build-extra-vars-GitHubRunners.sh`, `ops/_require-gh-token.sh`, `ops/_stage-runner-tarball.sh`, `ops/_resolve-runner-version.ps1`, `ops/_ensure-runner-tarball.ps1` | Runner-domain extra-vars, token acquisition, tarball staging |
@@ -371,8 +526,10 @@ holds its own code **and** tests:
 hyper-v/ubuntu/
   shared/                       Used by both impls
     setup-secrets.ps1             Store runner config in the local vault
+    runner-dashboard.ps1          Live board - what each runner is running now
+    dashboard/                    Frame formatting, elapsed rendering, key polling
     Install-ModuleDependencies.ps1
-    Tests/                        setup-secrets.Tests.ps1
+    Tests/                        setup-secrets.Tests.ps1 + dashboard/
   PowerShell/                   PowerShell runner implementation
     register-runners.ps1          Thin entry point; delegates to Invoke-RunnerReconcileRun (up direction)
     deregister-runners.ps1        Thin entry point; delegates to Invoke-RunnerReconcileRun (down direction)

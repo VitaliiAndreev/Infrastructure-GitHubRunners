@@ -2,8 +2,8 @@
 
 Reconciles the actions/runner tarball cache and per-runner extracted
 directory on the target VM. First role applied by
-[`playbooks/register-runners.yml`](../../playbooks/register-runners.yml)
-(once that playbook lands in step 6); runs before `runner_registration`
+[`playbooks/register-runners.yml`](../../playbooks/register-runners.yml);
+runs before `runner_registration`
 so `config.sh` exists on disk when the registration step looks for it.
 
 ## Index

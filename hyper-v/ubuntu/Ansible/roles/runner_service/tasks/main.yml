@@ -1,6 +1,6 @@
 ---
 # Reconcile the systemd service for every declared runner on the current
-# host (problem.md / Role: runner_service). Four phases, all keyed off
+# host (problem.md / Role: runner_service). Six phases, all keyed off
 # the per-host vm_runner_entries fact (set by the runner_entry_resolve
 # meta dep):
 #
@@ -12,9 +12,15 @@
 #                     touches /etc/systemd/system, which become_user
 #                     could not do) and is the only branch that needs
 #                     root in this role.
-#   3. Enable + start - ansible.builtin.systemd with the unit name a
+#   3. Environment drop-in - point the unit at /etc/environment, before
+#                     the start below so a freshly installed unit never
+#                     accepts a job with a stripped environment.
+#   4. Enable + start - ansible.builtin.systemd with the unit name a
 #                     post-install re-probe captures.
-#   4. is-active re-check - explicit systemctl is-active per entry. The
+#   5. Environment refresh - restart the units whose /etc/environment
+#                     changed since they last started, which nothing in
+#                     systemd would otherwise notice.
+#   6. is-active re-check - explicit systemctl is-active per entry. The
 #                     systemd module reports "started" even when the
 #                     unit went active then immediately crashed (it only
 #                     observes the start transition, not subsequent
@@ -81,6 +87,9 @@
   loop_control:
     label: "{{ item.item.runnerName }}"
 
+- name: Point each runner unit at /etc/environment
+  ansible.builtin.include_tasks: _apply-environment-dropin.yml
+
 # Enable + start. The systemd module reports `changed: true` on the
 # transition from disabled/stopped to enabled/started; a re-run on a
 # healthy unit reports `changed: false`. become: true because
@@ -94,6 +103,12 @@
   loop: "{{ runner_service_unit_probes.results }}"
   loop_control:
     label: "{{ item.item.runnerName }}"
+
+# Runs before the is-active re-check below, so a unit that the restart
+# leaves dead is reported by the same assert that covers every other way
+# a runner fails to come up.
+- name: Restart runner units carrying a stale environment
+  ansible.builtin.include_tasks: _refresh-environment.yml
 
 # is-active re-check. Capture stdout per iteration without failing the
 # task so the assert below can render a single message that names the

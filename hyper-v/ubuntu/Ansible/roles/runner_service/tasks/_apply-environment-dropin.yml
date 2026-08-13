@@ -1,0 +1,63 @@
+---
+# Environment delivery, first half. Lands the systemd drop-in that
+# points each runner unit at /etc/environment; the second half
+# (_refresh-environment.yml) is what makes a later edit of that file
+# reach an already-running unit.
+#
+# Runs between the unit-name re-probe and the enable+start phase, which
+# is the ordering the delivery contract needs: a unit installed by this
+# same run must be started with the drop-in already in place, otherwise
+# the first jobs it accepts see a stripped environment and the failure
+# looks like a config problem rather than a race.
+#
+# The drop-in content is static (files/10-environment-file.conf) - only
+# its destination varies per unit. Keeping the value inside
+# /etc/environment rather than templating it into the unit is what stops
+# this repo from carrying a second copy of what the VM config already
+# declares.
+
+- name: Ensure the drop-in directory exists for each runner unit
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item.stdout | trim }}.d"
+    state: directory
+    owner: root
+    group: root
+    mode: "0755"
+  become: true
+  loop: "{{ runner_service_unit_probes.results }}"
+  loop_control:
+    label: "{{ item.item.runnerName }}"
+
+# Registered because the restart decision in _refresh-environment.yml
+# reads this result per entry: a drop-in that was only just written did
+# not exist when a running unit last started, so that unit is carrying
+# no EnvironmentFile at all until it is bounced.
+- name: Render the EnvironmentFile drop-in for each runner unit
+  ansible.builtin.copy:
+    src: 10-environment-file.conf
+    dest: >-
+      /etc/systemd/system/{{ item.stdout | trim
+      }}.d/10-environment-file.conf
+    owner: root
+    group: root
+    mode: "0644"
+  become: true
+  loop: "{{ runner_service_unit_probes.results }}"
+  loop_control:
+    label: "{{ item.item.runnerName }}"
+  register: runner_service_dropins
+
+# systemd caches unit definitions, so a drop-in written after the daemon
+# last read the unit is invisible until a reload - including to the
+# enable+start task immediately below, on the path where svc.sh install
+# and this drop-in both landed in the same run.
+#
+# noqa no-handler: a handler would run at the end of the play, long
+# after the enable+start and restart tasks that depend on this reload
+# having already happened. Ordering here is the contract, so the
+# `when` guard stays on the task.
+- name: Reload systemd when a drop-in changed  # noqa no-handler
+  ansible.builtin.systemd:
+    daemon_reload: true
+  become: true
+  when: runner_service_dropins is changed

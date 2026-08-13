@@ -1,0 +1,73 @@
+---
+# Register-flow prerequisite: verify every runner service user on this
+# host can reach the Docker socket.
+#
+# Why this lives here as a VALIDATION, not a grant. The docker-based CI
+# composites (actionlint, yamllint, ansible-lint, ...) run their linters
+# in containers, so the runner service user must be a member of the
+# 'docker' OS group to talk to /var/run/docker.sock. Ownership of that
+# grant is split across three repos and this repo is deliberately NOT
+# the one that mutates membership:
+#   - Infrastructure-Vm-Provisioner installs the daemon and creates the
+#     'docker' group (a side effect of the docker apt package), but
+#     leaves membership empty on purpose.
+#   - Infrastructure-Vm-Users is the single authority for supplementary
+#     group membership: its `users` role sets `groups` with
+#     `append: false`, so whatever that config lists IS the user's
+#     complete supplementary set. A membership added by any other repo
+#     is stripped on the next users reconcile - which makes granting it
+#     here a trap, not a fix.
+# So the durable grant is a `docker` entry in the runner user's
+# supplementary `groups` in the Vm-Users VmUsersConfig for this VM.
+#
+# The hazard this assert closes: VmRunnersConfig (runner users, this
+# repo) and VmUsersConfig (group membership, Vm-Users) are separate
+# secrets keyed independently by vmName, so an operator can add a runner
+# without granting it docker access. Without this gate that drift stays
+# silent until a container-based lint job fails mid-run with an opaque
+# "permission denied ... /var/run/docker.sock". Here it surfaces at
+# registration time with a message that names the exact fix.
+#
+# Gated on the 'docker' group existing: a host with no docker installed
+# has no such group, its runners are not expected to reach a socket, and
+# the whole check is skipped.
+
+# getent exits 0 with the group line when the group exists, 2 when it
+# does not. failed_when:false turns "group absent" into a skip signal
+# (rc != 0) rather than a task failure; changed_when:false + check_mode
+# keep this a pure read that also runs under --check.
+- name: Read the docker group entry (absent group -> skip the assert)
+  ansible.builtin.command:
+    cmd: getent group docker
+  register: runner_docker_group_lookup
+  become: true
+  changed_when: false
+  failed_when: false
+  check_mode: false
+
+# getent format is 'docker:x:<gid>:member1,member2'; the members live in
+# the 4th colon-field. An empty members field yields [] after dropping
+# the blank produced by split(','). The runner user carries 'docker' as
+# a SUPPLEMENTARY group (its primary group is its own per-user group, set
+# by runner_binary), so it appears in this member list when granted.
+- name: Assert each runner user can reach the docker socket
+  ansible.builtin.assert:
+    that:
+      - runner_user in runner_docker_group_members
+    fail_msg: >-
+      Runner user '{{ runner_user }}' is not in the 'docker' group on
+      {{ inventory_hostname }}, so its container-based CI jobs cannot
+      reach /var/run/docker.sock. Add 'docker' to this user's
+      supplementary 'groups' in the Infrastructure-Vm-Users VmUsersConfig
+      entry for this VM and re-run the users reconcile. See the
+      GitHubRunners README, "Docker socket access for runner users".
+    success_msg: "Runner user '{{ runner_user }}' has docker group access."
+    quiet: true
+  vars:
+    runner_docker_group_members: >-
+      {{ runner_docker_group_lookup.stdout.split(':')[3].split(',')
+         | select | list }}
+  loop: "{{ vm_runner_entries | map(attribute='runnerUsername') | unique | list }}"
+  loop_control:
+    loop_var: runner_user
+  when: runner_docker_group_lookup.rc == 0

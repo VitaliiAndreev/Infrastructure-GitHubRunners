@@ -12,7 +12,11 @@
 #   2. Stop branch  - ansible.builtin.systemd with state=stopped,
 #                     enabled=false. Stock module idempotence makes
 #                     already-stopped / already-disabled a no-op.
-#   3. Uninstall    - svc.sh uninstall removes the unit file from
+#   3. Drop-in      - remove the <unit>.d directory the register
+#                     direction renders into. svc.sh uninstall deletes
+#                     the unit file only, so without this the directory
+#                     outlives the unit it belonged to.
+#   4. Uninstall    - svc.sh uninstall removes the unit file from
 #                     /etc/systemd/system. svc.sh resolves the runner
 #                     root via $(pwd), so chdir is the contract (same
 #                     as the install branch in main.yml).
@@ -31,6 +35,25 @@
     name: "{{ item.stdout | trim }}"
     state: stopped
     enabled: false
+  become: true
+  loop: "{{ runner_service_unit_probes.results }}"
+  loop_control:
+    label: "{{ item.item.runnerName }}"
+  when: (item.stdout | trim) | length > 0
+
+# Whole directory rather than just the drop-in file this role renders:
+# an empty <unit>.d left behind is still a systemd drop-in directory for
+# a unit that no longer exists. Runs before the uninstall below so the
+# daemon-reload svc.sh performs is the last systemd-visible action of
+# the teardown.
+#
+# The recorded environment checksum under /opt/runners/<name>/ is not
+# removed here - it goes with the tree runner_binary's remove direction
+# deletes.
+- name: Remove the systemd drop-in directory for the runner unit
+  ansible.builtin.file:
+    path: "/etc/systemd/system/{{ item.stdout | trim }}.d"
+    state: absent
   become: true
   loop: "{{ runner_service_unit_probes.results }}"
   loop_control:
